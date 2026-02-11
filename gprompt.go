@@ -11,44 +11,41 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: gprompt <file.p>\n")
+	if len(os.Args) != 2 {
+		fmt.Fprintf(os.Stderr, "usage: gprompt <file.p>\n")
 		os.Exit(1)
 	}
 
 	filename := os.Args[1]
 
-	// 1. Parse input file
+	// Step 1: Parse input file
 	program, err := parser.Parse(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "parse error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 2. Load stdlib into registry
+	// Step 2: Load stdlib
 	reg := registry.NewRegistry()
-	if err := reg.LoadStdlib(); err != nil {
-		fmt.Fprintf(os.Stderr, "Registry error: %v\n", err)
-		os.Exit(1)
-	}
+	_ = reg.LoadStdlib() // stdlib is optional
 
-	// 2b. Register custom methods from input file
+	// Step 3: Register custom methods from input file
 	for _, method := range program.Methods {
 		reg.Register(method)
 	}
 
-	// 3. Compile to execution plan
+	// Step 4: Compile program
 	comp := compiler.NewCompiler(reg)
 	plan, err := comp.Compile(program)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Compile error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "compile error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 4. Execute
+	// Step 5: Execute plan
 	rt := runtime.NewRuntime()
 	if err := rt.Execute(plan); err != nil {
-		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "runtime error: %v\n", err)
 		os.Exit(1)
 	}
 }

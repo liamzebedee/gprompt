@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
 	"p2p/parser"
 )
 
+// Registry manages method definitions
 type Registry struct {
 	methods map[string]*parser.MethodDefinition
 }
@@ -19,55 +19,52 @@ func NewRegistry() *Registry {
 	}
 }
 
-// LoadStdlib loads the standard library from stdlib.p
+// LoadStdlib loads the standard library from various possible locations
 func (r *Registry) LoadStdlib() error {
-	// Try multiple paths
-	paths := []string{
+	possiblePaths := []string{
 		"./stdlib.p",
 		"/home/liam/Music/p2p/stdlib.p",
 	}
 
-	// Also try relative to the executable
-	if exePath, err := os.Executable(); err == nil {
-		paths = append(paths, filepath.Join(filepath.Dir(exePath), "stdlib.p"))
+	// Also try to find relative to the executable
+	exePath, err := os.Executable()
+	if err == nil {
+		possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(exePath), "stdlib.p"))
 	}
 
-	var lastErr error
-	for _, path := range paths {
-		if err := r.Load(path); err == nil {
-			return nil // Successfully loaded
-		} else {
-			lastErr = err
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			return r.Load(path)
 		}
 	}
 
-	return fmt.Errorf("could not load stdlib.p from any path: %w", lastErr)
+	// stdlib.p is optional, so don't error if not found
+	return nil
 }
 
 // Load parses a file and registers all methods from it
 func (r *Registry) Load(filename string) error {
 	program, err := parser.Parse(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse %s: %w", filename, err)
 	}
 
-	for name, methodDef := range program.Methods {
-		r.methods[name] = methodDef
+	for name, method := range program.Methods {
+		r.methods[name] = method
 	}
 
 	return nil
 }
 
-// Get retrieves a method definition by name
+// Get retrieves a method from the registry
 func (r *Registry) Get(name string) (*parser.MethodDefinition, error) {
-	method, exists := r.methods[name]
-	if !exists {
-		return nil, fmt.Errorf("method not found: @%s", name)
+	if method, exists := r.methods[name]; exists {
+		return method, nil
 	}
-	return method, nil
+	return nil, fmt.Errorf("method '%s' not found", name)
 }
 
-// Register adds a method definition to the registry
+// Register adds a method to the registry
 func (r *Registry) Register(method *parser.MethodDefinition) {
 	r.methods[method.Name] = method
 }

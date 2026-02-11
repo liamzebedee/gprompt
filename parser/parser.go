@@ -1,19 +1,21 @@
 package parser
 
 import (
-	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
+// MethodDefinition represents a method defined in a .p file
 type MethodDefinition struct {
-	Name       string
-	Parameters []string
-	Body       string
-	LineNum    int
+	Name      string
+	Params    []string
+	Body      string
+	LineNum   int
 }
 
+// MethodInvocation represents a method call like @method(args)
 type MethodInvocation struct {
 	Name         string
 	Arguments    []string
@@ -21,33 +23,25 @@ type MethodInvocation struct {
 	LineNum      int
 }
 
+// Program represents the parsed .p file
 type Program struct {
 	Methods     map[string]*MethodDefinition
 	Invocations []*MethodInvocation
 }
 
-// Parse reads a .p file and returns the parsed program
+// Parse parses a .p file and returns the Program
 func Parse(filename string) (*Program, error) {
-	return parseWithBasePath(filename, "")
+	return parseWithBasePath(filename, filepath.Dir(filename))
 }
 
-// parseWithBasePath is the internal parser that tracks the base directory for relative imports
+// parseWithBasePath parses a file with a specific base path for imports
 func parseWithBasePath(filename string, basePath string) (*Program, error) {
-	file, err := os.Open(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open %s: %w", filename, err)
-	}
-	defer file.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading file: %w", err)
+		return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
 	}
 
+	lines := strings.Split(string(content), "\n")
 	program := &Program{
 		Methods:     make(map[string]*MethodDefinition),
 		Invocations: make([]*MethodInvocation, 0),
@@ -63,41 +57,42 @@ func parseWithBasePath(filename string, basePath string) (*Program, error) {
 			continue
 		}
 
-		// Check if it's a file import (@file.p)
-		if isFileImport(line) {
-			importedFile := extractImportFilename(line)
-			imported, err := parseFileImport(importedFile, filename)
-			if err != nil {
-				return nil, fmt.Errorf("error importing %s at line %d: %w", importedFile, i+1, err)
+		// Check for file import
+		if isFileImport(strings.TrimSpace(line)) {
+			importPath := strings.TrimSpace(line)
+			if strings.HasPrefix(importPath, "@") {
+				importPath = importPath[1:]
 			}
-			// Merge imported methods into current program
+			// Resolve relative to current file's directory
+			resolvedPath := filepath.Join(basePath, importPath)
+			imported, err := parseWithBasePath(resolvedPath, filepath.Dir(resolvedPath))
+			if err != nil {
+				return nil, fmt.Errorf("failed to import %s: %w", importPath, err)
+			}
+			// Merge imported methods
 			for name, method := range imported.Methods {
 				program.Methods[name] = method
 			}
-			// Don't add import as an invocation
 			i++
 			continue
 		}
 
-		// Check if it's a method definition (ends with ':')
-		if isMethodDefinition(line) {
-			methodDef, nextLine, err := parseMethodDefinition(lines, i)
+		// Check for method definition (name: or name(params):)
+		if isMethodDefinition(strings.TrimSpace(line)) {
+			method, nextIdx, err := parseMethodDefinition(lines, i)
 			if err != nil {
 				return nil, err
 			}
-			program.Methods[methodDef.Name] = methodDef
-			i = nextLine
+			program.Methods[method.Name] = method
+			i = nextIdx
 			continue
 		}
 
-		// Check if it's a method invocation (starts with '@')
+		// Check for method invocation
 		if strings.HasPrefix(strings.TrimSpace(line), "@") {
-			invocation, err := parseMethodInvocation(line, i+1)
-			if err != nil {
-				return nil, err
-			}
-			program.Invocations = append(program.Invocations, invocation)
-			i++
+			inv, nextIdx := parseMethodInvocation(lines, i)
+			program.Invocations = append(program.Invocations, inv)
+			i = nextIdx
 			continue
 		}
 
@@ -107,182 +102,134 @@ func parseWithBasePath(filename string, basePath string) (*Program, error) {
 	return program, nil
 }
 
-// isFileImport checks if a line is a file import (@file.p)
+// isFileImport checks if a line is a file import like @stdlib.p
 func isFileImport(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "@") {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "@") {
 		return false
 	}
-	// Remove @ and check if it ends with .p
-	name := strings.TrimPrefix(trimmed, "@")
-	// Extract just the filename part (before any spaces or parens)
-	parts := strings.FieldsFunc(name, func(r rune) bool {
-		return r == ' ' || r == '('
-	})
-	if len(parts) > 0 {
-		return strings.HasSuffix(parts[0], ".p")
+	// File imports end with .p and have no parentheses
+	if strings.HasSuffix(line, ".p") && !strings.Contains(line, "(") {
+		return true
 	}
 	return false
 }
 
-// extractImportFilename extracts the filename from an import line
-func extractImportFilename(line string) string {
-	trimmed := strings.TrimSpace(line)
-	trimmed = strings.TrimPrefix(trimmed, "@")
-	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
-		return r == ' ' || r == '('
-	})
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return ""
-}
-
-// parseFileImport recursively parses an imported file
-func parseFileImport(importPath string, currentFile string) (*Program, error) {
-	// If importPath is relative, resolve it relative to currentFile's directory
-	if !strings.HasPrefix(importPath, "/") {
-		dir := currentFile
-		// Get directory of current file
-		lastSlash := strings.LastIndex(dir, "/")
-		if lastSlash != -1 {
-			dir = dir[:lastSlash]
-			importPath = dir + "/" + importPath
-		}
-	}
-	return parseWithBasePath(importPath, "")
-}
-
 // isMethodDefinition checks if a line is a method definition
 func isMethodDefinition(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.Contains(trimmed, ":") && !strings.HasPrefix(trimmed, "@")
+	line = strings.TrimSpace(line)
+	// Method definition: name: or name(params):
+	if strings.Contains(line, ":") && !strings.HasPrefix(line, "@") {
+		return true
+	}
+	return false
 }
 
-// parseMethodDefinition parses a method definition and its body
+// parseMethodDefinition parses a method definition block
 func parseMethodDefinition(lines []string, startIdx int) (*MethodDefinition, int, error) {
+	line := strings.TrimSpace(lines[startIdx])
+
+	// Extract name and parameters
+	colonIdx := strings.Index(line, ":")
+	if colonIdx == -1 {
+		return nil, startIdx + 1, fmt.Errorf("malformed method definition at line %d", startIdx+1)
+	}
+
+	signature := line[:colonIdx]
+	name := signature
+	var params []string
+
+	if strings.Contains(signature, "(") {
+		nameEnd := strings.Index(signature, "(")
+		name = signature[:nameEnd]
+		paramsStr := signature[nameEnd+1:]
+		if strings.HasSuffix(paramsStr, ")") {
+			paramsStr = paramsStr[:len(paramsStr)-1]
+		}
+		if strings.TrimSpace(paramsStr) != "" {
+			params = strings.Split(paramsStr, ",")
+			for i := range params {
+				params[i] = strings.TrimSpace(params[i])
+			}
+		}
+	}
+
+	name = strings.TrimSpace(name)
+
+	// Collect body (tab-indented lines)
+	var body []string
+	i := startIdx + 1
+	for i < len(lines) {
+		if lines[i] == "" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(lines[i], "\t") {
+			// Remove the leading tab
+			body = append(body, lines[i][1:])
+			i++
+		} else if !strings.HasPrefix(lines[i], "\t") && strings.TrimSpace(lines[i]) != "" {
+			// End of body
+			break
+		} else {
+			i++
+		}
+	}
+
+	method := &MethodDefinition{
+		Name:    name,
+		Params:  params,
+		Body:    strings.Join(body, "\n"),
+		LineNum: startIdx + 1,
+	}
+
+	return method, i, nil
+}
+
+// parseMethodInvocation parses a method invocation
+func parseMethodInvocation(lines []string, startIdx int) (*MethodInvocation, int) {
 	line := lines[startIdx]
 	trimmed := strings.TrimSpace(line)
 
-	// Extract method name and parameters
-	colonIdx := strings.Index(trimmed, ":")
-	if colonIdx == -1 {
-		return nil, 0, fmt.Errorf("malformed method definition at line %d", startIdx+1)
+	// Remove leading @
+	if strings.HasPrefix(trimmed, "@") {
+		trimmed = trimmed[1:]
 	}
 
-	nameAndParams := strings.TrimSpace(trimmed[:colonIdx])
-	name, params := extractMethodNameAndParams(nameAndParams)
+	// Extract method name and arguments
+	var name string
+	var args []string
+	var trailing string
 
-	// Collect body (tab-indented lines following the definition)
-	var bodyLines []string
-	nextIdx := startIdx + 1
-
-	for nextIdx < len(lines) {
-		currentLine := lines[nextIdx]
-
-		// Stop if line is empty or comment
-		if strings.TrimSpace(currentLine) == "" || strings.HasPrefix(strings.TrimSpace(currentLine), "#") {
-			nextIdx++
-			continue
-		}
-
-		// Stop if line doesn't start with tab
-		if !strings.HasPrefix(currentLine, "\t") {
-			break
-		}
-
-		// Add to body (remove leading tab)
-		bodyLines = append(bodyLines, strings.TrimPrefix(currentLine, "\t"))
-		nextIdx++
-	}
-
-	body := strings.Join(bodyLines, "\n")
-
-	return &MethodDefinition{
-		Name:       name,
-		Parameters: params,
-		Body:       body,
-		LineNum:    startIdx + 1,
-	}, nextIdx, nil
-}
-
-// extractMethodNameAndParams extracts name and parameters from "methodName(param1, param2)"
-func extractMethodNameAndParams(nameAndParams string) (string, []string) {
-	parenIdx := strings.Index(nameAndParams, "(")
-	if parenIdx == -1 {
-		// No parameters
-		return nameAndParams, []string{}
-	}
-
-	name := strings.TrimSpace(nameAndParams[:parenIdx])
-	paramsStr := nameAndParams[parenIdx+1:]
-	closeParen := strings.LastIndex(paramsStr, ")")
-	if closeParen != -1 {
-		paramsStr = paramsStr[:closeParen]
-	}
-
-	var params []string
-	for _, p := range strings.Split(paramsStr, ",") {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			params = append(params, trimmed)
-		}
-	}
-
-	return name, params
-}
-
-// parseMethodInvocation parses a method invocation like "@method-name(arg1, arg2) trailing text"
-func parseMethodInvocation(line string, lineNum int) (*MethodInvocation, error) {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "@") {
-		return nil, fmt.Errorf("invalid invocation at line %d: must start with @", lineNum)
-	}
-
-	// Remove @ prefix
-	trimmed = trimmed[1:]
-
-	// Find method name and arguments
-	var methodName string
-	var arguments []string
-	var trailingText string
-
-	// Find the opening parenthesis
-	parenIdx := strings.Index(trimmed, "(")
-	if parenIdx == -1 {
-		// No arguments, just method name and trailing text
-		parts := strings.SplitN(trimmed, " ", 2)
-		methodName = parts[0]
-		if len(parts) > 1 {
-			trailingText = parts[1]
+	// Check for parentheses (method with arguments)
+	if parenIdx := strings.Index(trimmed, "("); parenIdx != -1 {
+		name = strings.TrimSpace(trimmed[:parenIdx])
+		closeIdx := strings.Index(trimmed, ")")
+		if closeIdx != -1 {
+			argsStr := trimmed[parenIdx+1 : closeIdx]
+			if strings.TrimSpace(argsStr) != "" {
+				args = strings.Split(argsStr, ",")
+				for i := range args {
+					args[i] = strings.TrimSpace(args[i])
+				}
+			}
+			trailing = strings.TrimSpace(trimmed[closeIdx+1:])
 		}
 	} else {
-		methodName = strings.TrimSpace(trimmed[:parenIdx])
-
-		// Find the closing parenthesis
-		closeParenIdx := strings.Index(trimmed, ")")
-		if closeParenIdx == -1 {
-			return nil, fmt.Errorf("unmatched parenthesis at line %d", lineNum)
-		}
-
-		argsStr := trimmed[parenIdx+1 : closeParenIdx]
-		for _, arg := range strings.Split(argsStr, ",") {
-			trimmedArg := strings.TrimSpace(arg)
-			if trimmedArg != "" {
-				arguments = append(arguments, trimmedArg)
-			}
-		}
-
-		// Trailing text is everything after the closing parenthesis
-		if closeParenIdx+1 < len(trimmed) {
-			trailingText = strings.TrimSpace(trimmed[closeParenIdx+1:])
+		// No parentheses - split on first space or take whole thing
+		parts := strings.SplitN(trimmed, " ", 2)
+		name = parts[0]
+		if len(parts) > 1 {
+			trailing = parts[1]
 		}
 	}
 
-	return &MethodInvocation{
-		Name:         methodName,
-		Arguments:    arguments,
-		TrailingText: trailingText,
-		LineNum:      lineNum,
-	}, nil
+	inv := &MethodInvocation{
+		Name:         name,
+		Arguments:    args,
+		TrailingText: trailing,
+		LineNum:      startIdx + 1,
+	}
+
+	return inv, startIdx + 1
 }

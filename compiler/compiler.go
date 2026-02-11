@@ -8,15 +8,18 @@ import (
 	"p2p/registry"
 )
 
+// CompiledPrompt represents a resolved prompt ready for execution
 type CompiledPrompt struct {
-	Text    string
+	Prompt  string
 	LineNum int
 }
 
+// ExecutionPlan is an ordered list of prompts to execute
 type ExecutionPlan struct {
 	Prompts []*CompiledPrompt
 }
 
+// Compiler compiles programs to execution plans
 type Compiler struct {
 	registry *registry.Registry
 }
@@ -28,68 +31,62 @@ func NewCompiler(reg *registry.Registry) *Compiler {
 	}
 }
 
-// Compile takes a program and returns an execution plan
+// Compile converts a program to an execution plan
 func (c *Compiler) Compile(program *parser.Program) (*ExecutionPlan, error) {
 	plan := &ExecutionPlan{
 		Prompts: make([]*CompiledPrompt, 0),
 	}
 
-	for _, invocation := range program.Invocations {
-		prompt, err := c.resolveInvocation(invocation)
+	for _, inv := range program.Invocations {
+		compiled, err := c.resolveInvocation(inv)
 		if err != nil {
-			return nil, fmt.Errorf("error at line %d: %w", invocation.LineNum, err)
+			return nil, fmt.Errorf("line %d: %w", inv.LineNum, err)
 		}
-
-		plan.Prompts = append(plan.Prompts, &CompiledPrompt{
-			Text:    prompt,
-			LineNum: invocation.LineNum,
-		})
+		plan.Prompts = append(plan.Prompts, compiled)
 	}
 
 	return plan, nil
 }
 
-// resolveInvocation resolves a method invocation to a prompt string
-func (c *Compiler) resolveInvocation(inv *parser.MethodInvocation) (string, error) {
-	// Get method definition from registry
-	methodDef, err := c.registry.Get(inv.Name)
+// resolveInvocation resolves a method invocation
+func (c *Compiler) resolveInvocation(inv *parser.MethodInvocation) (*CompiledPrompt, error) {
+	method, err := c.registry.Get(inv.Name)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+
+	// Check parameter count
+	if len(inv.Arguments) != len(method.Params) {
+		return nil, fmt.Errorf("method '%s' expects %d arguments, got %d",
+			inv.Name, len(method.Params), len(inv.Arguments))
 	}
 
 	// Build parameter map
-	paramMap := make(map[string]string)
-	if len(methodDef.Parameters) != len(inv.Arguments) {
-		return "", fmt.Errorf("method @%s expects %d arguments, got %d",
-			inv.Name, len(methodDef.Parameters), len(inv.Arguments))
-	}
-
-	for i, paramName := range methodDef.Parameters {
-		paramMap[paramName] = inv.Arguments[i]
+	params := make(map[string]string)
+	for i, param := range method.Params {
+		params[param] = inv.Arguments[i]
 	}
 
 	// Interpolate body
-	interpolated := c.interpolate(methodDef.Body, paramMap)
+	prompt := c.interpolate(method.Body, params)
 
 	// Append trailing text
-	var result strings.Builder
-	result.WriteString(interpolated)
 	if inv.TrailingText != "" {
-		if interpolated != "" {
-			result.WriteString("\n")
-		}
-		result.WriteString(inv.TrailingText)
+		prompt += "\n" + inv.TrailingText
 	}
 
-	return result.String(), nil
+	return &CompiledPrompt{
+		Prompt:  prompt,
+		LineNum: inv.LineNum,
+	}, nil
 }
 
-// interpolate replaces [param] placeholders with values
+// interpolate replaces [param] placeholders with argument values
 func (c *Compiler) interpolate(body string, params map[string]string) string {
 	result := body
-	for paramName, paramValue := range params {
-		placeholder := "[" + paramName + "]"
-		result = strings.ReplaceAll(result, placeholder, paramValue)
+	for param, value := range params {
+		placeholder := "[" + param + "]"
+		result = strings.ReplaceAll(result, placeholder, value)
 	}
 	return result
 }

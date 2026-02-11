@@ -42,3 +42,44 @@ you could also make it more powerful:
 the language is evaluated line by line, as is most programming lanuguages
 
 the @listify line gets the completion from previous line and listifies it. context is implicitly passed
+
+
+## Computational power.
+
+the final bit of power comes in compositional computational thinking.
+say you wanted to explore a topic in depth. like build a template for a book which is about how to build a blockchain.
+
+```
+# y3.p
+book(topic):
+	topic -> fleshed-out-topic (details) -> book-outline (generate-outline) -> all-chapters (map(chapters, flesh-out-chapter))
+
+detail(topic):
+	We are writing a book about [topic]. Write a general outline of a good introduction to such a topic.
+
+generate-outline:
+	From this material, generate an outline for a book and save to `book-outline.md`.
+	e.g.
+	* Chapter 1: Title
+		* Core topic sentence
+		* Point 1..[3-5]
+		* Conclusion
+	* Chapter 2: Title
+	* Chapter 3: Title
+
+flesh-out-chapter:
+	We have a book topic and outline. 
+	Your job is to "flesh out" a chapter into its full contents and save it in chapters/[index].md
+
+	Chapter: [chapter]
+```
+
+`book` declaratively defines a sort of workflow. This is how it works:
+
+-> defines a series of steps
+fleshed-out-topic, book-outline are simple labels to make the logic easy to read
+details, generate-outline are the actual methods which are called
+topic is the variable
+`map` is a special stdlib function which maps over each chapter and fleshes it out. this invokes the runtime in parallel. chapters is a name given to the last step's output, flesh-out-chapter is the function called
+
+
