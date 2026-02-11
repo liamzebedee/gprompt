@@ -4,8 +4,11 @@ p programming language
 p is a programming language/runtime for prompting
 
 ```sh
-$ export PATH=$PATH:$(pwd)/src/bin
-$ cat examples/y/y.p
+make all
+export PATH=$PATH:$(pwd)/src/bin
+```
+
+```yaml
 @conversational
 how do trees grow?
 @listify(n=10)
