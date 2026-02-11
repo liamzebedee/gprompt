@@ -245,10 +245,65 @@ How would we express this in any agent framework that exists today? I don't know
 
 Let's try writing some code before we've even implemented the features of our runtime:
 
-```
-# nyt.p
 
 
 
-```
 
+
+## Orchestration
+
+Let's say you want to define some software development workflow:
+
+- read backlog
+- read slack
+- work on features
+- build and create pr's and respond to pr feedback
+- keep track of all of this
+
+What if you could scale it up too? Rather than just manually managing how many agents and stuff you have.
+
+You could have:
+
+ - an agent that only builds new features
+ - an agent that only does bug fixes
+ - an agent that only does release management, updating changelog
+ - an agent that figures out marketing based on changelog
+ - an agent that listens to user feedback and sets roadmap and product requirements (founder/PM)
+
+Honestly, we might just end up subsuming all of these roles, since the model will absorb them into its intelligence. 
+"Build the product" 
+
+But over time, we will still want to direct models using English and treat them as an engineering system.
+Maybe we will let agents intelligently design themselves?!
+
+agent(founder-pm)
+agent(marketing)
+agent(loop(changelog-and-releases))
+agent(loop(bugfix))
+agent(loop(build-review-test-merge))
+
+
+founder-pm:
+	Read user feedback. Store in folder.
+	Come up with new ideas.	
+
+marketing:
+	Read the changelog
+	Create briefs—“this is the creative thing we want to sell”
+	Loop on generating ideas until some criterion is met (the idea is good enough according to an audience)
+	Generate TikToks for those ideas
+	Schedule and publish
+	Measure engagement
+	Store feedback in a folder
+
+changelog-and-releases:
+	Pickup new changes to the git repo. 
+	Read git history.
+	Add information to the changelog.
+	Every so often, schedule a new release when major features are done.
+
+bugfix:
+	...
+
+build-review-test-merge:
+	...
