@@ -2,31 +2,19 @@ package runtime
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	"p2p/debug"
 )
 
-// Execute runs compiled prompt steps through the claude CLI.
-// Each step is sent as a prompt. The response from each step
-// becomes context for the next step.
-func Execute(steps []string) error {
-	context := ""
-	for i, step := range steps {
-		prompt := step
-		if context != "" {
-			prompt = context + "\n" + step
-		}
-
-		response, err := callClaude(prompt)
-		if err != nil {
-			return fmt.Errorf("step %d: %w", i+1, err)
-		}
-		context = response
-	}
-	return nil
+// Execute sends a compiled prompt to the claude CLI.
+func Execute(prompt string) error {
+	debug.LogPrompt("EXEC", 1, prompt)
+	_, err := callClaude(prompt)
+	return err
 }
 
 func callClaude(prompt string) (string, error) {

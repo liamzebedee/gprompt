@@ -7,38 +7,28 @@ import (
 	"p2p/registry"
 )
 
-// Compile takes execution nodes (invocations + plain text) and a registry,
-// and produces a list of prompt strings. Each prompt is one LLM call.
-// Each @invocation starts a new step. Plain text accumulates into the current step.
-func Compile(nodes []parser.Node, reg *registry.Registry) []string {
-	var steps []string
-	var current strings.Builder
-	hasInvocation := false
+// Compile takes execution nodes and a registry, expands all invocations,
+// and concatenates everything into a single prompt string.
+func Compile(nodes []parser.Node, reg *registry.Registry) string {
+	var out strings.Builder
 
 	for _, node := range nodes {
 		switch node.Type {
 		case parser.NodeInvocation:
-			if hasInvocation {
-				steps = append(steps, current.String())
-				current.Reset()
+			if out.Len() > 0 {
+				out.WriteString("\n")
 			}
-			expanded := expand(node, reg)
-			current.WriteString(expanded)
-			hasInvocation = true
+			out.WriteString(expand(node, reg))
 
 		case parser.NodePlainText:
-			if current.Len() > 0 {
-				current.WriteString("\n")
+			if out.Len() > 0 {
+				out.WriteString("\n")
 			}
-			current.WriteString(node.Text)
+			out.WriteString(node.Text)
 		}
 	}
 
-	if current.Len() > 0 {
-		steps = append(steps, current.String())
-	}
-
-	return steps
+	return out.String()
 }
 
 func expand(node parser.Node, reg *registry.Registry) string {
@@ -57,10 +47,14 @@ func expand(node parser.Node, reg *registry.Registry) string {
 
 	body := method.Body
 
-	// Interpolate [param] with arg values
-	for i, param := range method.Params {
-		if i < len(node.Args) {
-			body = strings.ReplaceAll(body, "["+param+"]", node.Args[i])
+	// Interpolate [param] with arg values (supports name=value and positional)
+	positional := 0
+	for _, arg := range node.Args {
+		if k, v, ok := strings.Cut(arg, "="); ok {
+			body = strings.ReplaceAll(body, "["+k+"]", v)
+		} else if positional < len(method.Params) {
+			body = strings.ReplaceAll(body, "["+method.Params[positional]+"]", arg)
+			positional++
 		}
 	}
 

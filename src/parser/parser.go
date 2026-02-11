@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"bufio"
 	"os"
 	"strings"
 )
@@ -27,20 +26,15 @@ type Node struct {
 }
 
 func Parse(filename string) ([]Node, error) {
-	f, err := os.Open(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	return ParseString(string(content))
+}
 
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
+func ParseString(content string) ([]Node, error) {
+	lines := strings.Split(content, "\n")
 
 	var nodes []Node
 	i := 0
@@ -88,47 +82,91 @@ func Parse(filename string) ([]Node, error) {
 			continue
 		}
 
-		// Lines starting with @
-		if strings.HasPrefix(trimmed, "@") {
-			rest := trimmed[1:]
-			fields := strings.Fields(rest)
-			if len(fields) == 0 {
-				i++
-				continue
-			}
-
-			// Import: first word ends with .p and no parens
-			firstWord := fields[0]
-			if strings.HasSuffix(firstWord, ".p") && !strings.Contains(firstWord, "(") {
-				nodes = append(nodes, Node{
-					Type:       NodeImport,
-					ImportPath: firstWord,
-				})
-				i++
-				continue
-			}
-
-			// Invocation
-			name, args, trailing := parseInvocation(rest)
-			nodes = append(nodes, Node{
-				Type:     NodeInvocation,
-				Name:     name,
-				Args:     args,
-				Trailing: trailing,
-			})
-			i++
-			continue
-		}
-
-		// Plain text
-		nodes = append(nodes, Node{
-			Type: NodePlainText,
-			Text: trimmed,
-		})
+		// Parse line for @ expressions (can appear anywhere in the line)
+		nodes = append(nodes, parseLine(trimmed)...)
 		i++
 	}
 
 	return nodes, nil
+}
+
+// parseLine splits a line into plain text, imports, and invocation nodes.
+// Handles inline @ expressions like "some text @method(args) more text".
+func parseLine(line string) []Node {
+	var nodes []Node
+	for {
+		atIdx := strings.Index(line, "@")
+		if atIdx == -1 {
+			// No more @ — rest is plain text
+			if t := strings.TrimSpace(line); t != "" {
+				nodes = append(nodes, Node{Type: NodePlainText, Text: t})
+			}
+			break
+		}
+
+		// Text before the @
+		if atIdx > 0 {
+			if t := strings.TrimSpace(line[:atIdx]); t != "" {
+				nodes = append(nodes, Node{Type: NodePlainText, Text: t})
+			}
+		}
+
+		rest := line[atIdx+1:]
+		if len(rest) == 0 {
+			break
+		}
+
+		// Import: word ends with .p and no parens
+		fields := strings.Fields(rest)
+		firstWord := fields[0]
+		if strings.HasSuffix(firstWord, ".p") && !strings.Contains(firstWord, "(") {
+			nodes = append(nodes, Node{Type: NodeImport, ImportPath: firstWord})
+			line = strings.TrimSpace(rest[len(firstWord):])
+			continue
+		}
+
+		// Invocation with parens: consume name(...)
+		if parenIdx := strings.Index(rest, "("); parenIdx != -1 {
+			// Check there's no space before the paren (it's part of the method name)
+			nameCandidate := rest[:parenIdx]
+			if !strings.Contains(nameCandidate, " ") {
+				closeIdx := strings.Index(rest, ")")
+				if closeIdx != -1 {
+					name := nameCandidate
+					argStr := rest[parenIdx+1 : closeIdx]
+					var args []string
+					if argStr != "" {
+						args = strings.Split(argStr, ",")
+						for i := range args {
+							args[i] = strings.TrimSpace(args[i])
+						}
+					}
+					nodes = append(nodes, Node{
+						Type: NodeInvocation,
+						Name: name,
+						Args: args,
+					})
+					line = strings.TrimSpace(rest[closeIdx+1:])
+					continue
+				}
+			}
+		}
+
+		// Invocation without parens: @word consumes rest of line as trailing
+		parts := strings.SplitN(rest, " ", 2)
+		name := parts[0]
+		trailing := ""
+		if len(parts) > 1 {
+			trailing = parts[1]
+		}
+		nodes = append(nodes, Node{
+			Type:     NodeInvocation,
+			Name:     name,
+			Trailing: trailing,
+		})
+		break // trailing consumed rest of line
+	}
+	return nodes
 }
 
 func parseMethodHeader(line string) (string, []string) {
