@@ -1,92 +1,73 @@
 package compiler
 
 import (
-	"fmt"
 	"strings"
 
-	"p2p/src/parser"
-	"p2p/src/registry"
+	"p2p/parser"
+	"p2p/registry"
 )
 
-// CompiledPrompt represents a resolved prompt ready for execution
-type CompiledPrompt struct {
-	Prompt  string
-	LineNum int
-}
+// Compile takes execution nodes (invocations + plain text) and a registry,
+// and produces a list of prompt strings. Each prompt is one LLM call.
+// Each @invocation starts a new step. Plain text accumulates into the current step.
+func Compile(nodes []parser.Node, reg *registry.Registry) []string {
+	var steps []string
+	var current strings.Builder
+	hasInvocation := false
 
-// ExecutionPlan is an ordered list of prompts to execute
-type ExecutionPlan struct {
-	Prompts []*CompiledPrompt
-}
+	for _, node := range nodes {
+		switch node.Type {
+		case parser.NodeInvocation:
+			if hasInvocation {
+				steps = append(steps, current.String())
+				current.Reset()
+			}
+			expanded := expand(node, reg)
+			current.WriteString(expanded)
+			hasInvocation = true
 
-// Compiler compiles programs to execution plans
-type Compiler struct {
-	registry *registry.Registry
-}
-
-// NewCompiler creates a new compiler with a registry
-func NewCompiler(reg *registry.Registry) *Compiler {
-	return &Compiler{
-		registry: reg,
-	}
-}
-
-// Compile converts a program to an execution plan
-func (c *Compiler) Compile(program *parser.Program) (*ExecutionPlan, error) {
-	plan := &ExecutionPlan{
-		Prompts: make([]*CompiledPrompt, 0),
-	}
-
-	for _, inv := range program.Invocations {
-		compiled, err := c.resolveInvocation(inv)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", inv.LineNum, err)
+		case parser.NodePlainText:
+			if current.Len() > 0 {
+				current.WriteString("\n")
+			}
+			current.WriteString(node.Text)
 		}
-		plan.Prompts = append(plan.Prompts, compiled)
 	}
 
-	return plan, nil
+	if current.Len() > 0 {
+		steps = append(steps, current.String())
+	}
+
+	return steps
 }
 
-// resolveInvocation resolves a method invocation
-func (c *Compiler) resolveInvocation(inv *parser.MethodInvocation) (*CompiledPrompt, error) {
-	method, err := c.registry.Get(inv.Name)
-	if err != nil {
-		return nil, err
+func expand(node parser.Node, reg *registry.Registry) string {
+	method := reg.Get(node.Name)
+	if method == nil {
+		// Unknown method — pass through raw
+		text := "@" + node.Name
+		if len(node.Args) > 0 {
+			text += "(" + strings.Join(node.Args, ", ") + ")"
+		}
+		if node.Trailing != "" {
+			text += " " + node.Trailing
+		}
+		return text
 	}
 
-	// Check parameter count
-	if len(inv.Arguments) != len(method.Params) {
-		return nil, fmt.Errorf("method '%s' expects %d arguments, got %d",
-			inv.Name, len(method.Params), len(inv.Arguments))
-	}
+	body := method.Body
 
-	// Build parameter map
-	params := make(map[string]string)
+	// Interpolate [param] with arg values
 	for i, param := range method.Params {
-		params[param] = inv.Arguments[i]
+		if i < len(node.Args) {
+			body = strings.ReplaceAll(body, "["+param+"]", node.Args[i])
+		}
 	}
-
-	// Interpolate body
-	prompt := c.interpolate(method.Body, params)
 
 	// Append trailing text
-	if inv.TrailingText != "" {
-		prompt += "\n" + inv.TrailingText
+	if node.Trailing != "" {
+		body += "\n" + node.Trailing
 	}
 
-	return &CompiledPrompt{
-		Prompt:  prompt,
-		LineNum: inv.LineNum,
-	}, nil
-}
-
-// interpolate replaces [param] placeholders with argument values
-func (c *Compiler) interpolate(body string, params map[string]string) string {
-	result := body
-	for param, value := range params {
-		placeholder := "[" + param + "]"
-		result = strings.ReplaceAll(result, placeholder, value)
-	}
-	return result
+	return body
 }

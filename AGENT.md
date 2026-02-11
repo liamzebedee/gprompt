@@ -4,24 +4,20 @@
 
 ```
 /home/liam/Music/p2p/
-├── go.mod                    # Go module definition
-├── Makefile                  # Build system
-├── gprompt.go                # Main entry point (54 lines)
 ├── AGENT.md                  # Architecture documentation (this file)
+├── spec.md                   # Original spec
 ├── spec2.md                  # Language specification
-├── src/                      # Core source packages
-│   ├── parser/parser.go      # AST parser with file imports (221 lines)
-│   ├── compiler/compiler.go  # Compilation logic (95 lines)
-│   ├── runtime/runtime.go    # Execution runtime (87 lines)
-│   ├── registry/registry.go  # Method registry (73 lines)
-│   └── stdlib.p              # Standard library methods
-├── examples/                 # Example and test programs
-│   ├── test_custom.p         # Test custom method definitions
-│   ├── test_import.p         # Test file imports
-│   ├── test_params.p         # Test parameter interpolation
-│   └── test_context.p        # Test implicit context passing
-└── bin/
-    └── gprompt               # Compiled binary (after build)
+└── src/                      # Everything lives here
+    ├── go.mod                # Go module definition (module root)
+    ├── Makefile              # Build system
+    ├── gprompt.go            # Main entry point (package main)
+    ├── stdlib.p              # Standard library methods
+    ├── parser/parser.go      # AST parser with file imports
+    ├── compiler/compiler.go  # Compilation logic
+    ├── runtime/runtime.go    # Execution runtime
+    ├── registry/registry.go  # Method registry
+    └── bin/
+        └── gprompt           # Compiled binary (after build)
 ```
 
 ## Implementation Details
@@ -33,10 +29,10 @@
 - **runtime/**: Executes via `claude` CLI with implicit context passing
 
 ### Build System
-- `make` - Compiles to bin/gprompt
-- `make clean` - Removes binary
-- Go module: `p2p`
-- Imports use absolute paths: `p2p/src/parser`, `p2p/src/compiler`, etc.
+- `cd src && make` - Compiles to `src/bin/gprompt`
+- `cd src && make clean` - Removes binary
+- Go module: `p2p` (go.mod is in `src/`)
+- Imports: `p2p/parser`, `p2p/compiler`, `p2p/registry`, `p2p/runtime`
 
 ## Language Features Implemented
 
@@ -86,22 +82,10 @@ listify(n):
 
 ## Testing
 
-Test files are in the `examples/` directory:
 ```bash
-# Build the binary
+cd src
 make
-
-# Basic execution with custom test file
-./bin/gprompt examples/test_custom.p
-
-# File imports
-./bin/gprompt examples/test_import.p
-
-# Parameter interpolation
-./bin/gprompt examples/test_params.p
-
-# Context passing between invocations
-./bin/gprompt examples/test_context.p
+./bin/gprompt ../y.p
 ```
 
 ## Architecture Overview
@@ -118,12 +102,7 @@ make
 
 ## Known Limitations
 
-- stdlib.p is loaded from multiple search paths (in priority order):
-  - `./src/stdlib.p` (src/ subdirectory)
-  - `./stdlib.p` (root directory)
-  - `/home/liam/Music/p2p/src/stdlib.p` (absolute path to src/)
-  - `/home/liam/Music/p2p/stdlib.p` (absolute path to root)
-  - `{exe_dir}/src/stdlib.p` and `{exe_dir}/stdlib.p` (relative to binary)
+- stdlib.p is searched relative to the input file's directory, CWD, and binary location
 - Requires `claude` CLI to be available in PATH
 - No error recovery - first error stops execution
 

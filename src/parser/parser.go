@@ -1,235 +1,185 @@
 package parser
 
 import (
-	"fmt"
+	"bufio"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
-// MethodDefinition represents a method defined in a .p file
-type MethodDefinition struct {
-	Name      string
-	Params    []string
-	Body      string
-	LineNum   int
+type NodeType int
+
+const (
+	NodeMethodDef NodeType = iota
+	NodeInvocation
+	NodeImport
+	NodePlainText
+)
+
+type Node struct {
+	Type       NodeType
+	Name       string   // method name (def/invocation)
+	Params     []string // param names (def)
+	Body       string   // body text (def)
+	Args       []string // arg values (invocation)
+	Trailing   string   // trailing text (invocation)
+	ImportPath string   // file path (import)
+	Text       string   // content (plain text)
 }
 
-// MethodInvocation represents a method call like @method(args)
-type MethodInvocation struct {
-	Name         string
-	Arguments    []string
-	TrailingText string
-	LineNum      int
-}
-
-// Program represents the parsed .p file
-type Program struct {
-	Methods     map[string]*MethodDefinition
-	Invocations []*MethodInvocation
-}
-
-// Parse parses a .p file and returns the Program
-func Parse(filename string) (*Program, error) {
-	return parseWithBasePath(filename, filepath.Dir(filename))
-}
-
-// parseWithBasePath parses a file with a specific base path for imports
-func parseWithBasePath(filename string, basePath string) (*Program, error) {
-	content, err := os.ReadFile(filename)
+func Parse(filename string) ([]Node, error) {
+	f, err := os.Open(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 
-	lines := strings.Split(string(content), "\n")
-	program := &Program{
-		Methods:     make(map[string]*MethodDefinition),
-		Invocations: make([]*MethodInvocation, 0),
-	}
-
+	var nodes []Node
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
+		trimmed := strings.TrimSpace(line)
 
 		// Skip empty lines and comments
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			i++
 			continue
 		}
 
-		// Check for file import
-		if isFileImport(strings.TrimSpace(line)) {
-			importPath := strings.TrimSpace(line)
-			if strings.HasPrefix(importPath, "@") {
-				importPath = importPath[1:]
+		// Method definition: unindented line ending with ':'
+		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "@") && strings.HasSuffix(trimmed, ":") {
+			name, params := parseMethodHeader(trimmed)
+			var bodyLines []string
+			i++
+			for i < len(lines) {
+				if strings.HasPrefix(lines[i], "\t") {
+					bodyLines = append(bodyLines, strings.TrimPrefix(lines[i], "\t"))
+					i++
+				} else if strings.TrimSpace(lines[i]) == "" {
+					// Blank line in body: include if next non-blank line is indented
+					j := i + 1
+					for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+						j++
+					}
+					if j < len(lines) && strings.HasPrefix(lines[j], "\t") {
+						bodyLines = append(bodyLines, "")
+						i++
+					} else {
+						break
+					}
+				} else {
+					break
+				}
 			}
-			// Resolve relative to current file's directory
-			resolvedPath := filepath.Join(basePath, importPath)
-			imported, err := parseWithBasePath(resolvedPath, filepath.Dir(resolvedPath))
-			if err != nil {
-				return nil, fmt.Errorf("failed to import %s: %w", importPath, err)
+			nodes = append(nodes, Node{
+				Type:   NodeMethodDef,
+				Name:   name,
+				Params: params,
+				Body:   strings.Join(bodyLines, "\n"),
+			})
+			continue
+		}
+
+		// Lines starting with @
+		if strings.HasPrefix(trimmed, "@") {
+			rest := trimmed[1:]
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				i++
+				continue
 			}
-			// Merge imported methods
-			for name, method := range imported.Methods {
-				program.Methods[name] = method
+
+			// Import: first word ends with .p and no parens
+			firstWord := fields[0]
+			if strings.HasSuffix(firstWord, ".p") && !strings.Contains(firstWord, "(") {
+				nodes = append(nodes, Node{
+					Type:       NodeImport,
+					ImportPath: firstWord,
+				})
+				i++
+				continue
 			}
+
+			// Invocation
+			name, args, trailing := parseInvocation(rest)
+			nodes = append(nodes, Node{
+				Type:     NodeInvocation,
+				Name:     name,
+				Args:     args,
+				Trailing: trailing,
+			})
 			i++
 			continue
 		}
 
-		// Check for method definition (name: or name(params):)
-		if isMethodDefinition(strings.TrimSpace(line)) {
-			method, nextIdx, err := parseMethodDefinition(lines, i)
-			if err != nil {
-				return nil, err
-			}
-			program.Methods[method.Name] = method
-			i = nextIdx
-			continue
-		}
-
-		// Check for method invocation
-		if strings.HasPrefix(strings.TrimSpace(line), "@") {
-			inv, nextIdx := parseMethodInvocation(lines, i)
-			program.Invocations = append(program.Invocations, inv)
-			i = nextIdx
-			continue
-		}
-
+		// Plain text
+		nodes = append(nodes, Node{
+			Type: NodePlainText,
+			Text: trimmed,
+		})
 		i++
 	}
 
-	return program, nil
+	return nodes, nil
 }
 
-// isFileImport checks if a line is a file import like @stdlib.p
-func isFileImport(line string) bool {
-	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "@") {
-		return false
-	}
-	// File imports end with .p and have no parentheses
-	if strings.HasSuffix(line, ".p") && !strings.Contains(line, "(") {
-		return true
-	}
-	return false
-}
+func parseMethodHeader(line string) (string, []string) {
+	line = strings.TrimSuffix(line, ":")
 
-// isMethodDefinition checks if a line is a method definition
-func isMethodDefinition(line string) bool {
-	line = strings.TrimSpace(line)
-	// Method definition: name: or name(params):
-	if strings.Contains(line, ":") && !strings.HasPrefix(line, "@") {
-		return true
-	}
-	return false
-}
-
-// parseMethodDefinition parses a method definition block
-func parseMethodDefinition(lines []string, startIdx int) (*MethodDefinition, int, error) {
-	line := strings.TrimSpace(lines[startIdx])
-
-	// Extract name and parameters
-	colonIdx := strings.Index(line, ":")
-	if colonIdx == -1 {
-		return nil, startIdx + 1, fmt.Errorf("malformed method definition at line %d", startIdx+1)
-	}
-
-	signature := line[:colonIdx]
-	name := signature
-	var params []string
-
-	if strings.Contains(signature, "(") {
-		nameEnd := strings.Index(signature, "(")
-		name = signature[:nameEnd]
-		paramsStr := signature[nameEnd+1:]
-		if strings.HasSuffix(paramsStr, ")") {
-			paramsStr = paramsStr[:len(paramsStr)-1]
+	if idx := strings.Index(line, "("); idx != -1 {
+		name := line[:idx]
+		closeIdx := strings.Index(line, ")")
+		if closeIdx == -1 {
+			return line, nil
 		}
-		if strings.TrimSpace(paramsStr) != "" {
-			params = strings.Split(paramsStr, ",")
-			for i := range params {
-				params[i] = strings.TrimSpace(params[i])
+		paramStr := line[idx+1 : closeIdx]
+		if paramStr == "" {
+			return name, nil
+		}
+		params := strings.Split(paramStr, ",")
+		for i := range params {
+			params[i] = strings.TrimSpace(params[i])
+		}
+		return name, params
+	}
+
+	return line, nil
+}
+
+func parseInvocation(rest string) (string, []string, string) {
+	// With parenthesized args: method(arg1, arg2) trailing
+	if idx := strings.Index(rest, "("); idx != -1 {
+		name := rest[:idx]
+		closeIdx := strings.Index(rest, ")")
+		if closeIdx == -1 {
+			return rest, nil, ""
+		}
+		argStr := rest[idx+1 : closeIdx]
+		var args []string
+		if argStr != "" {
+			args = strings.Split(argStr, ",")
+			for i := range args {
+				args[i] = strings.TrimSpace(args[i])
 			}
 		}
+		trailing := strings.TrimSpace(rest[closeIdx+1:])
+		return name, args, trailing
 	}
 
-	name = strings.TrimSpace(name)
-
-	// Collect body (tab-indented lines)
-	var body []string
-	i := startIdx + 1
-	for i < len(lines) {
-		if lines[i] == "" {
-			i++
-			continue
-		}
-		if strings.HasPrefix(lines[i], "\t") {
-			// Remove the leading tab
-			body = append(body, lines[i][1:])
-			i++
-		} else if !strings.HasPrefix(lines[i], "\t") && strings.TrimSpace(lines[i]) != "" {
-			// End of body
-			break
-		} else {
-			i++
-		}
+	// Without parens: method trailing text
+	parts := strings.SplitN(rest, " ", 2)
+	name := parts[0]
+	trailing := ""
+	if len(parts) > 1 {
+		trailing = parts[1]
 	}
-
-	method := &MethodDefinition{
-		Name:    name,
-		Params:  params,
-		Body:    strings.Join(body, "\n"),
-		LineNum: startIdx + 1,
-	}
-
-	return method, i, nil
-}
-
-// parseMethodInvocation parses a method invocation
-func parseMethodInvocation(lines []string, startIdx int) (*MethodInvocation, int) {
-	line := lines[startIdx]
-	trimmed := strings.TrimSpace(line)
-
-	// Remove leading @
-	if strings.HasPrefix(trimmed, "@") {
-		trimmed = trimmed[1:]
-	}
-
-	// Extract method name and arguments
-	var name string
-	var args []string
-	var trailing string
-
-	// Check for parentheses (method with arguments)
-	if parenIdx := strings.Index(trimmed, "("); parenIdx != -1 {
-		name = strings.TrimSpace(trimmed[:parenIdx])
-		closeIdx := strings.Index(trimmed, ")")
-		if closeIdx != -1 {
-			argsStr := trimmed[parenIdx+1 : closeIdx]
-			if strings.TrimSpace(argsStr) != "" {
-				args = strings.Split(argsStr, ",")
-				for i := range args {
-					args[i] = strings.TrimSpace(args[i])
-				}
-			}
-			trailing = strings.TrimSpace(trimmed[closeIdx+1:])
-		}
-	} else {
-		// No parentheses - split on first space or take whole thing
-		parts := strings.SplitN(trimmed, " ", 2)
-		name = parts[0]
-		if len(parts) > 1 {
-			trailing = parts[1]
-		}
-	}
-
-	inv := &MethodInvocation{
-		Name:         name,
-		Arguments:    args,
-		TrailingText: trailing,
-		LineNum:      startIdx + 1,
-	}
-
-	return inv, startIdx + 1
+	return name, nil, trailing
 }

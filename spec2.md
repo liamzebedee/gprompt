@@ -44,7 +44,7 @@ the language is evaluated line by line, as is most programming lanuguages
 the @listify line gets the completion from previous line and listifies it. context is implicitly passed
 
 
-## Computational power.
+## Workflows
 
 the final bit of power comes in compositional computational thinking.
 say you wanted to explore a topic in depth. like build a template for a book which is about how to build a blockchain.
@@ -81,5 +81,54 @@ fleshed-out-topic, book-outline are simple labels to make the logic easy to read
 details, generate-outline are the actual methods which are called
 topic is the variable
 `map` is a special stdlib function which maps over each chapter and fleshes it out. this invokes the runtime in parallel. chapters is a name given to the last step's output, flesh-out-chapter is the function called
+
+This construct allows you to construct higher-level chains of prompts together, as well as run them in parallel (`map`)
+
+
+### Looping
+
+Looping is one of the most useful constructs.
+
+We might have our book but it is probably slop as it exists currently.
+
+The core idea of looping is expressing something like:
+
+Idea -> Specifications -> Plan -> Loop(Build)
+
+In fact you could express this in our language as follows:
+
+```p
+# ralph1.p
+dev:
+    Idea -> Specifications -> Plan -> loop(Build)
+```
+
+A useful thing to do is actually run a specific stage of the workflow we're in:
+
+```
+gprompt -s dev.Loop(Build) dev.p
+```
+
+Anyways, what does this `loop` construct do?
+
+`loop` basically continually executes the Build function in sequential order.
+
+### Supervising other loops
+
+Because models are sometimes dumb, we often times want to have some supervision in the loop. This can be done by another agent actually. 
+
+How could we express this in P?
+
+```
+# ralph2.p
+dev:
+    Idea -> Specifications -> Plan -> supervise-build(loop(Build))
+
+supervise-build:
+    agent(You are an agent in charge of supervising a build loop. Each iteration, make notes. Ensure the build loop continues in a productive path and does not loop indefinitely or see-saw.)
+```
+
+
+
 
 
