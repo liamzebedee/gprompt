@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"p2p/parser"
+	"p2p/src/parser"
 )
 
 // Registry manages method definitions

@@ -2,7 +2,7 @@
 
 all: bin/gprompt
 
-bin/gprompt: gprompt.go parser/parser.go compiler/compiler.go runtime/runtime.go registry/registry.go
+bin/gprompt: gprompt.go src/parser/parser.go src/compiler/compiler.go src/runtime/runtime.go src/registry/registry.go
 	@mkdir -p bin
 	go build -o bin/gprompt .
 

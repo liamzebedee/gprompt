@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"p2p/compiler"
-	"p2p/parser"
-	"p2p/registry"
-	"p2p/runtime"
+	"p2p/src/compiler"
+	"p2p/src/parser"
+	"p2p/src/registry"
+	"p2p/src/runtime"
 )
 
 func main() {

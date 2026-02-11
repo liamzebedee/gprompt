@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"p2p/parser"
-	"p2p/registry"
+	"p2p/src/parser"
+	"p2p/src/registry"
 )
 
 // CompiledPrompt represents a resolved prompt ready for execution

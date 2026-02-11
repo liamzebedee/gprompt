@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"p2p/compiler"
+	"p2p/src/compiler"
 )
 
 // Runtime executes compiled prompts with implicit context passing
