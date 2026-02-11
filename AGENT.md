@@ -75,11 +75,6 @@ listify(n):
 - Each invocation receives accumulated output from previous lines as context
 - Prompt = context + "\n" + current_prompt
 
-## Stdlib Methods
-
-- **conversational**: Respond in 3 sentences max, conversational tone
-- **listify(n)**: Convert to n items
-
 ## Testing
 
 ```bash

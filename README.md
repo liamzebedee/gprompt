@@ -37,19 +37,17 @@ conversational:
 
 listify(n):
 	Convert to [n] items.
+
+@conversational
+how do trees grow? 
+@listify(n=10)
 ```
 
 You can define methods like the above. Methods can have args and they are interpolated using `[]` in the body.
 
 Methods are natively multiline markdown prompts. You don't have to do anything but indent them.
 
-A prompt file is a bit like a Python script. Where if you don't contain code within a method, it is run. This is how `y.p` was evaluated before, look-
-
-```
-@conversational
-how do trees grow? 
-@listify(n=10)
-```
+A prompt file is a bit like a Python script. Where if you don't contain code within a method, it is run.
 
 This entire block is evaluated into one prompt. This is the compiled prompt that is run:
 
@@ -63,7 +61,64 @@ You can run the prompt by using `gprompt file.p`. It uses the local `claude` CLI
 
 `gprompt -d file.p` will print debug output, so you can see what is happening.
 
+## Writing a book using P pipelines.
+
+The idea behind P was kinda just making something where I could easily express the ideas I have with LLM's. 
+
+I've used Ralph, OpenProse, OpenCode, Claude Skills, DSPY, etc. And before that, multimodal pipelines with Python and Handlebars, etc. 
+
+The thing is - they're not really *it*, are they? They can be slow, cumbersome, and they just don't feel like **computational thought**. It's not how I would write it in my dream language, it's not intuitive enough.
+
+**Writing a book is an interesting eval for "prompt runtimes".** Here's how it looks in P:
+
+```
+# book.p
+book(topic):
+	topic -> brief (book-idea) -> chapter-outline (generate-chapter-index) -> chapters (map(chapters, flesh-out-chapter)) -> final (concat)
+
+book-idea(topic):
+	We are writing a book about [topic]. Generate a briefer on what it should cover and why it's good.
+
+gen-chapter-index:
+	From this briefer on a book, generate an index of chapters - 1 per line with a title. Max 5 chapters.
+
+flesh-out-chapter:
+	Expand this chapter into a title, 2 paragraphs, and conclusion. 
+
+concat:
+	Take all the chapters of this book and put it into one markdown file `book.md`, adding structure as needed.
+
+@book(blockchain)
+```
+
+P is kind of inspired by declarative programming - Kubernetes and React are both examples of this. 
+
+Kubernetes .yaml files specify what the infrastructure should look like, rather than how to orchestrate it.  
+
+React .tsx files specify what the UI should look like, rather than how to create it
+
+Likewise, my attempt with P is to specify how the end result of your LLM's intelligence should look like, rather than how to achieve it. 
+
+A book is defined by a one-way flow of prompts, some of which are executed in parallel using `map`.
+
+```
+book(topic):
+	topic -> brief (book-idea) -> chapter-outline (generate-chapter-index) -> chapters (map(chapters, flesh-out-chapter)) -> final (concat)
+```
+
+We begin with the topic for the book, generate a brief in detail, generate an outline of the book's chapters, generate the chapters by mapping over each chapter in the outline and fleshing it out, and then finally binding it all together. Note that all of these call methods we've defined, but they are secondary to the shape. 
+
+There are some benefits to defining this workflow:
+
+ - **Each prompt can be tested individually**. Want to improve the chapter generation? You can work on that individual prompt.
+ - **The pipeline can be invoked at different stages**. You can stop the pipeline and go back if you don't like the outputs.
 
 
+For example, here's how to test an individual prompt:
 
+```
+$ ./src/bin/gprompt -d ../book.p -e "@book-idea(egyptian llm's)"
+```
+
+Which will output for `We are writing a book about egyptian llm's. Generate a briefer on what it should cover and why it's good.`. 
 

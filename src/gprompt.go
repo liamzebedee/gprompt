@@ -18,16 +18,26 @@ var stdlibSource string
 
 func main() {
 	args := os.Args[1:]
+	var evalExpr string
 	for i := 0; i < len(args); i++ {
-		if args[i] == "-d" {
+		switch args[i] {
+		case "-d":
 			debug.Enabled = true
 			args = append(args[:i], args[i+1:]...)
+			i--
+		case "-e":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "-e requires an expression\n")
+				os.Exit(1)
+			}
+			evalExpr = args[i+1]
+			args = append(args[:i], args[i+2:]...)
 			i--
 		}
 	}
 
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: gprompt [-d] <file.p>\n")
+		fmt.Fprintf(os.Stderr, "usage: gprompt [-d] [-e expr] <file.p>\n")
 		os.Exit(1)
 	}
 
@@ -73,6 +83,22 @@ func main() {
 			}
 		default:
 			execNodes = append(execNodes, node)
+		}
+	}
+
+	// If -e was given, parse it as the exec nodes instead
+	if evalExpr != "" {
+		debug.Log("eval: %s", evalExpr)
+		evalNodes, err := parser.ParseString(evalExpr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "eval parse error: %v\n", err)
+			os.Exit(1)
+		}
+		execNodes = nil
+		for _, n := range evalNodes {
+			if n.Type != parser.NodeMethodDef {
+				execNodes = append(execNodes, n)
+			}
 		}
 	}
 

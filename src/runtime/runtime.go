@@ -89,19 +89,22 @@ func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry
 			}
 
 			results := make([]string, len(items))
+			prompts := make([]string, len(items))
+			for j, item := range items {
+				prompts[j] = item + "\n\n" + method.Body
+				debug.LogPrompt(fmt.Sprintf("PIPELINE MAP %d/%d: %s", j+1, len(items), step.MapMethod), stepNum, prompts[j])
+			}
+
 			var mu sync.Mutex
 			var wg sync.WaitGroup
 			var firstErr error
 
-			for j, item := range items {
+			for j := range items {
 				wg.Add(1)
-				go func(idx int, item string) {
+				go func(idx int) {
 					defer wg.Done()
 
-					prompt := item + "\n\n" + method.Body
-					debug.LogPrompt(fmt.Sprintf("PIPELINE MAP %d/%d: %s", idx+1, len(items), step.MapMethod), stepNum, prompt)
-
-					result, err := callClaudeCapture(prompt)
+					result, err := callClaudeCapture(prompts[idx])
 
 					mu.Lock()
 					defer mu.Unlock()
@@ -109,7 +112,7 @@ func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry
 						firstErr = fmt.Errorf("map item %d: %w", idx+1, err)
 					}
 					results[idx] = result
-				}(j, item)
+				}(j)
 			}
 
 			wg.Wait()
@@ -131,9 +134,18 @@ func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry
 	return nil
 }
 
+// claudeCmd builds the base claude command with flags that:
+// - prevent project context (AGENT.md) from leaking via --system-prompt ""
+// - bypass all permission checks so tools (file read/write) execute without prompting
+func claudeCmd(extraArgs ...string) *exec.Cmd {
+	args := []string{"-p", "--system-prompt", "", "--dangerously-skip-permissions"}
+	args = append(args, extraArgs...)
+	return exec.Command("claude", args...)
+}
+
 // callClaude runs claude -p, streaming output to stdout and capturing it.
 func callClaude(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p")
+	cmd := claudeCmd()
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var buf bytes.Buffer
@@ -150,7 +162,7 @@ func callClaude(prompt string) (string, error) {
 
 // callClaudeCapture runs claude -p, capturing output silently (no stdout streaming).
 func callClaudeCapture(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p")
+	cmd := claudeCmd()
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var buf bytes.Buffer
@@ -167,7 +179,7 @@ func callClaudeCapture(prompt string) (string, error) {
 
 // callClaudeJSON runs claude -p --output-format json and extracts the result field.
 func callClaudeJSON(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p", "--output-format", "json")
+	cmd := claudeCmd("--output-format", "json")
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var buf bytes.Buffer
