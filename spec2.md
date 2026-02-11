@@ -39,10 +39,49 @@ you could also make it more powerful:
 @listify(5)
 ```
 
-the language is evaluated line by line, as is most programming lanuguages
+this evaluates to a single prompt which includes listifying the output.
 
-the @listify line gets the completion from previous line and listifies it. context is implicitly passed
+```
+(base) liam@rand:~/Music/p2p$ ./src/bin/gprompt -d y.p 
+[debug] parsing y.p
+[debug] parsed 3 nodes
+[debug]   node[0] type=1 name="conversational"
+[debug]   node[1] type=3 name=""
+[debug]   node[2] type=1 name="listify"
+[debug] stdlib search: stdlib.p
+[debug] stdlib search: stdlib.p
+[debug] stdlib search: /home/liam/Music/p2p/src/bin/stdlib.p
+[debug] stdlib not found on disk, using embedded
+[debug] stdlib method: "conversational"
+[debug] stdlib method: "listify"
+[debug] compiling 3 exec nodes
+[debug] ┌────────────────────────────────────────────────────────────
+[debug] │ STEP 1 COMPILED
+[debug] ├────────────────────────────────────────────────────────────
+[debug] │ Respond conversationally, only 3 short sentences max, and keep it light, not dense. Do not respond with bulk text unless I ask for detail. We're just talking.
+[debug] │ how do trees grow?
+[debug] │ Convert to 10 items.
+[debug] └────────────────────────────────────────────────────────────
+[debug] ┌────────────────────────────────────────────────────────────
+[debug] │ STEP 1 EXEC
+[debug] ├────────────────────────────────────────────────────────────
+[debug] │ Respond conversationally, only 3 short sentences max, and keep it light, not dense. Do not respond with bulk text unless I ask for detail. We're just talking.
+[debug] │ how do trees grow?
+[debug] │ Convert to 10 items.
+[debug] └────────────────────────────────────────────────────────────
+Trees grow by adding new cells at their tips (apical meristems) and widening their trunks through a layer called the cambium. Here are 10 key points:
 
+1. Seeds germinate when moisture, warmth, and light align
+2. Roots push downward, anchoring the tree and absorbing water
+3. Shoots grow upward toward sunlight
+4. Apical meristems at branch tips drive height growth
+5. The cambium layer beneath the bark adds girth each year
+6. Each year's cambium growth creates a new tree ring
+7. Leaves photosynthesize sunlight into sugars that fuel growth
+8. Xylem carries water up; phloem carries sugars down
+9. Hormones like auxin control which branches grow and which stay dormant
+10. Growth slows in winter (or dry seasons) and surges in spring
+```
 
 ## Workflows
 
@@ -52,7 +91,7 @@ say you wanted to explore a topic in depth. like build a template for a book whi
 ```
 # y3.p
 book(topic):
-	topic -> fleshed-out-topic (details) -> book-outline (generate-outline) -> all-chapters (map(chapters, flesh-out-chapter))
+    topic -> fleshed-out-topic (details) -> book-outline (generate-outline) -> all-chapters (map(chapters, flesh-out-chapter))
 
 detail(topic):
 	We are writing a book about [topic]. Write a general outline of a good introduction to such a topic.
@@ -105,7 +144,7 @@ dev:
 
 A useful thing to do is actually run a specific stage of the workflow we're in:
 
-```
+```sh
 gprompt -s dev.Loop(Build) dev.p
 ```
 
@@ -128,7 +167,7 @@ supervise-build:
     agent(You are an agent in charge of supervising a build loop. Each iteration, make notes. Ensure the build loop continues in a productive path and does not loop indefinitely or see-saw.)
 ```
 
-
+ 
 
 
 
