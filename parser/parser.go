@@ -28,6 +28,11 @@ type Program struct {
 
 // Parse reads a .p file and returns the parsed program
 func Parse(filename string) (*Program, error) {
+	return parseWithBasePath(filename, "")
+}
+
+// parseWithBasePath is the internal parser that tracks the base directory for relative imports
+func parseWithBasePath(filename string, basePath string) (*Program, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", filename, err)
@@ -58,6 +63,22 @@ func Parse(filename string) (*Program, error) {
 			continue
 		}
 
+		// Check if it's a file import (@file.p)
+		if isFileImport(line) {
+			importedFile := extractImportFilename(line)
+			imported, err := parseFileImport(importedFile, filename)
+			if err != nil {
+				return nil, fmt.Errorf("error importing %s at line %d: %w", importedFile, i+1, err)
+			}
+			// Merge imported methods into current program
+			for name, method := range imported.Methods {
+				program.Methods[name] = method
+			}
+			// Don't add import as an invocation
+			i++
+			continue
+		}
+
 		// Check if it's a method definition (ends with ':')
 		if isMethodDefinition(line) {
 			methodDef, nextLine, err := parseMethodDefinition(lines, i)
@@ -84,6 +105,52 @@ func Parse(filename string) (*Program, error) {
 	}
 
 	return program, nil
+}
+
+// isFileImport checks if a line is a file import (@file.p)
+func isFileImport(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "@") {
+		return false
+	}
+	// Remove @ and check if it ends with .p
+	name := strings.TrimPrefix(trimmed, "@")
+	// Extract just the filename part (before any spaces or parens)
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == ' ' || r == '('
+	})
+	if len(parts) > 0 {
+		return strings.HasSuffix(parts[0], ".p")
+	}
+	return false
+}
+
+// extractImportFilename extracts the filename from an import line
+func extractImportFilename(line string) string {
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, "@")
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ' ' || r == '('
+	})
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return ""
+}
+
+// parseFileImport recursively parses an imported file
+func parseFileImport(importPath string, currentFile string) (*Program, error) {
+	// If importPath is relative, resolve it relative to currentFile's directory
+	if !strings.HasPrefix(importPath, "/") {
+		dir := currentFile
+		// Get directory of current file
+		lastSlash := strings.LastIndex(dir, "/")
+		if lastSlash != -1 {
+			dir = dir[:lastSlash]
+			importPath = dir + "/" + importPath
+		}
+	}
+	return parseWithBasePath(importPath, "")
 }
 
 // isMethodDefinition checks if a line is a method definition
