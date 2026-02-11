@@ -22,13 +22,16 @@ func NewRegistry() *Registry {
 // LoadStdlib loads the standard library from various possible locations
 func (r *Registry) LoadStdlib() error {
 	possiblePaths := []string{
+		"./src/stdlib.p",
 		"./stdlib.p",
+		"/home/liam/Music/p2p/src/stdlib.p",
 		"/home/liam/Music/p2p/stdlib.p",
 	}
 
 	// Also try to find relative to the executable
 	exePath, err := os.Executable()
 	if err == nil {
+		possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(exePath), "src/stdlib.p"))
 		possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(exePath), "stdlib.p"))
 	}
 
