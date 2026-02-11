@@ -7,14 +7,21 @@
 ├── go.mod                    # Go module definition
 ├── Makefile                  # Build system
 ├── gprompt.go                # Main entry point (54 lines)
-├── stdlib.p                  # Standard library methods
-├── src/
+├── AGENT.md                  # Architecture documentation (this file)
+├── spec2.md                  # Language specification
+├── src/                      # Core source packages
 │   ├── parser/parser.go      # AST parser with file imports (221 lines)
 │   ├── compiler/compiler.go  # Compilation logic (95 lines)
 │   ├── runtime/runtime.go    # Execution runtime (87 lines)
-│   └── registry/registry.go  # Method registry (73 lines)
+│   ├── registry/registry.go  # Method registry (73 lines)
+│   └── stdlib.p              # Standard library methods
+├── examples/                 # Example and test programs
+│   ├── test_custom.p         # Test custom method definitions
+│   ├── test_import.p         # Test file imports
+│   ├── test_params.p         # Test parameter interpolation
+│   └── test_context.p        # Test implicit context passing
 └── bin/
-    └── gprompt               # Compiled binary
+    └── gprompt               # Compiled binary (after build)
 ```
 
 ## Implementation Details
@@ -79,22 +86,22 @@ listify(n):
 
 ## Testing
 
-Create test files to verify functionality:
+Test files are in the `examples/` directory:
 ```bash
-# Basic execution
-./bin/gprompt y.md
+# Build the binary
+make
+
+# Basic execution with custom test file
+./bin/gprompt examples/test_custom.p
 
 # File imports
-./bin/gprompt test_import.p
+./bin/gprompt examples/test_import.p
 
 # Parameter interpolation
-./bin/gprompt test_params.p
+./bin/gprompt examples/test_params.p
 
-# Custom methods
-./bin/gprompt test_custom.p
-
-# Context passing
-./bin/gprompt test_context.p
+# Context passing between invocations
+./bin/gprompt examples/test_context.p
 ```
 
 ## Architecture Overview
@@ -111,10 +118,12 @@ Create test files to verify functionality:
 
 ## Known Limitations
 
-- stdlib.p is loaded from multiple search paths:
-  - `./stdlib.p` (relative to working directory)
-  - `/home/liam/Music/p2p/stdlib.p` (absolute path)
-  - `{exe_dir}/stdlib.p` (relative to binary location)
+- stdlib.p is loaded from multiple search paths (in priority order):
+  - `./src/stdlib.p` (src/ subdirectory)
+  - `./stdlib.p` (root directory)
+  - `/home/liam/Music/p2p/src/stdlib.p` (absolute path to src/)
+  - `/home/liam/Music/p2p/stdlib.p` (absolute path to root)
+  - `{exe_dir}/src/stdlib.p` and `{exe_dir}/stdlib.p` (relative to binary)
 - Requires `claude` CLI to be available in PATH
 - No error recovery - first error stops execution
 
