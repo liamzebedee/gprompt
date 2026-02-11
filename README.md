@@ -4,14 +4,14 @@ p programming language
 p is a programming language/runtime for prompting
 
 ```sh
-(base) liam@rand:~/Music/p2p$ cat y.p 
+(base) liam@rand:~/Music/p2p$ cat examples/y/y.p
 @conversational
-how do trees grow? 
+how do trees grow?
 @listify(n=10)
 ```
 
 ```sh
-$ src/bin/gprompt -d y.p
+$ src/bin/gprompt -d examples/y/y.p
 Trees grow by adding new cells at their tips (apical meristems) and widening their trunks through a layer called the cambium. Here are 10 key points:
 
 1. Seeds germinate when moisture, warmth, and light align
@@ -28,7 +28,7 @@ Trees grow by adding new cells at their tips (apical meristems) and widening the
 
 It's my go at trying to build something like PHP was for web dev, but for prompting.
 
-The basic idea is you define prompts in `.p` files. For example, this is a library `lib.p`:
+The basic idea is you define prompts in `.p` files. For example:
 
 ```
 conversational:
@@ -72,21 +72,22 @@ The thing is - they're not really *it*, are they? They can be slow, cumbersome, 
 **Writing a book is an interesting eval for "prompt runtimes".** Here's how it looks in P:
 
 ```
-# book.p
+# examples/book/book.p
 book(topic):
 	topic -> brief (book-idea) -> chapter-outline (generate-chapter-index) -> chapters (map(chapters, flesh-out-chapter)) -> final (concat)
 
 book-idea(topic):
 	We are writing a book about [topic]. Generate a briefer on what it should cover and why it's good.
 
-gen-chapter-index:
+generate-chapter-index:
 	From this briefer on a book, generate an index of chapters - 1 per line with a title. Max 5 chapters.
 
 flesh-out-chapter:
-	Expand this chapter into a title, 2 paragraphs, and conclusion. 
+	Expand this chapter into a title, 2 paragraphs, and conclusion.
+	Save it to chapters/IDX.md
 
 concat:
-	Take all the chapters of this book and put it into one markdown file `book.md`, adding structure as needed.
+	Take all the chapters of this book in `chapters/*.md` and put it into one markdown file `book.md`, adding structure as needed.
 
 @book(blockchain)
 ```
@@ -117,7 +118,7 @@ There are some benefits to defining this workflow:
 For example, here's how to test an individual prompt:
 
 ```
-$ ./src/bin/gprompt -d ../book.p -e "@book-idea(egyptian llm's)"
+$ ./src/bin/gprompt -d examples/book/book.p -e "@book-idea(egyptian llm's)"
 ```
 
 Which will output for `We are writing a book about egyptian llm's. Generate a briefer on what it should cover and why it's good.`. 
