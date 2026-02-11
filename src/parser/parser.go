@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -49,11 +50,14 @@ func ParseString(content string) ([]Node, error) {
 		}
 
 		// Method definition: unindented line ending with ':'
-		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "@") && strings.HasSuffix(trimmed, ":") {
+		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "@") && strings.HasSuffix(trimmed, ":") {
 			name, params := parseMethodHeader(trimmed)
 			var bodyLines []string
 			i++
 			for i < len(lines) {
+				if lines[i] != "" && lines[i] != trimmed && lines[i][0] == ' ' {
+					return nil, fmt.Errorf("line %d: use tabs for indentation, not spaces", i+1)
+				}
 				if strings.HasPrefix(lines[i], "\t") {
 					bodyLines = append(bodyLines, strings.TrimPrefix(lines[i], "\t"))
 					i++
@@ -221,3 +225,4 @@ func parseInvocation(rest string) (string, []string, string) {
 	}
 	return name, nil, trailing
 }
+

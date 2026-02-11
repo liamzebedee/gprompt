@@ -85,6 +85,6 @@ loop(period):
 run(fn):
 	Execute function [fn].
 
-##merge(xs):
+#merge(xs):
 #	Join list items into one block.
 

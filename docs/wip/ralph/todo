@@ -1,0 +1,8 @@
+[debug] ┌────────────────────────────────────────────────────────────
+[debug] │ STEP 2 PIPELINE STEP 2: plan (plan)
+[debug] ├────────────────────────────────────────────────────────────
+[debug] │ Done! Created 4 spec files in `specs/`:
+
+
+
+context leaking from previous step?

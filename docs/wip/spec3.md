@@ -237,4 +237,18 @@ What might we need for a writer's studio:
 
 - information about the world (read different websites)
 - a team of 5 writers
-- 
+	- a writing process
+- an editor-in-chief
+- a website where they publish their articles
+
+How would we express this in any agent framework that exists today? I don't know but I'm sure it would be complicated.
+
+Let's try writing some code before we've even implemented the features of our runtime:
+
+```
+# nyt.p
+
+
+
+```
+

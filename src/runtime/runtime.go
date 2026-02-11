@@ -23,18 +23,25 @@ func Execute(prompt string) error {
 }
 
 // ExecutePipeline runs a multi-step pipeline, calling claude for each step.
-func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry.Registry) error {
+func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry.Registry, preamble string) error {
 	context := make(map[string]string)
 
-	// Seed context with initial input from args
-	initialValue, ok := args[p.InitialInput]
-	if !ok {
-		return fmt.Errorf("pipeline initial input %q not found in args", p.InitialInput)
+	// Seed context with initial input from args (if any)
+	if p.InitialInput != "" {
+		initialValue, ok := args[p.InitialInput]
+		if !ok {
+			return fmt.Errorf("pipeline initial input %q not found in args", p.InitialInput)
+		}
+		context[p.InitialInput] = initialValue
+		debug.Log("pipeline: initial input %q = %q", p.InitialInput, initialValue)
 	}
-	context[p.InitialInput] = initialValue
-	debug.Log("pipeline: initial input %q = %q", p.InitialInput, initialValue)
 
+	// Preamble goes on the initial context stack
 	var prevOutput string
+	if preamble != "" {
+		prevOutput = preamble
+		debug.Log("pipeline: preamble = %q", preamble)
+	}
 
 	for i, step := range p.Steps {
 		stepNum := i + 1
@@ -128,6 +135,34 @@ func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry
 				fmt.Print(joined)
 			}
 			debug.Log("pipeline: map step %d collected %d results, stored as %q", stepNum, len(results), step.Label)
+
+		case pipeline.StepLoop:
+			method := reg.Get(step.LoopMethod)
+			if method == nil {
+				return fmt.Errorf("step %d: unknown loop method %q", stepNum, step.LoopMethod)
+			}
+
+			iteration := 0
+			for {
+				iteration++
+				prompt := method.Body
+				if prevOutput != "" {
+					prompt = prevOutput + "\n\n" + prompt
+				}
+
+				debug.LogPrompt(fmt.Sprintf("PIPELINE LOOP %d iter %d: %s", stepNum, iteration, step.LoopMethod), stepNum, prompt)
+
+				result, err := callClaude(prompt)
+				if err != nil {
+					return fmt.Errorf("step %d (%s) iter %d: %w", stepNum, step.Label, iteration, err)
+				}
+
+				context[step.Label] = result
+				prevOutput = result
+				debug.Log("pipeline: loop step %d iter %d complete (%d bytes)", stepNum, iteration, len(result))
+
+				fmt.Fprintf(os.Stderr, "\n══════════════════ LOOP %d ══════════════════\n\n", iteration)
+			}
 		}
 	}
 
@@ -139,6 +174,11 @@ func ExecutePipeline(p *pipeline.Pipeline, args map[string]string, reg *registry
 // - bypass all permission checks so tools (file read/write) execute without prompting
 func claudeCmd(extraArgs ...string) *exec.Cmd {
 	args := []string{"-p", "--system-prompt", "", "--dangerously-skip-permissions"}
+	if m := os.Getenv("MODEL"); m != "" {
+		args = append(args, "--model", m)
+	} else {
+		args = append(args, "--model", "claude-opus-4-6")
+	}
 	args = append(args, extraArgs...)
 	return exec.Command("claude", args...)
 }

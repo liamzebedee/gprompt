@@ -11,60 +11,80 @@ import (
 type PlanKind int
 
 const (
-	PlanPrompt   PlanKind = iota // single prompt (existing behavior)
-	PlanPipeline                 // multi-step pipeline
+	PlanPrompt   PlanKind = iota
+	PlanPipeline
 )
 
 type Plan struct {
 	Kind     PlanKind
-	Prompt   string             // for PlanPrompt
-	Pipeline *pipeline.Pipeline // for PlanPipeline
-	Args     map[string]string  // bound args for pipeline
+	Prompt   string
+	Pipeline *pipeline.Pipeline
+	Args     map[string]string
+	Preamble string
 }
 
-// Compile takes execution nodes and a registry, returns a Plan.
-// If the nodes contain a single invocation of a pipeline method, returns PlanPipeline.
-// Otherwise returns PlanPrompt with the compiled prompt string.
 func Compile(nodes []parser.Node, reg *registry.Registry) *Plan {
-	// Check for single pipeline invocation
-	if len(nodes) == 1 && nodes[0].Type == parser.NodeInvocation {
-		method := reg.Get(nodes[0].Name)
-		if method != nil && method.IsPipeline {
-			args := bindArgs(method, nodes[0].Args)
-			return &Plan{
-				Kind:     PlanPipeline,
-				Pipeline: method.Pipeline,
-				Args:     args,
+	// Split nodes: find pipeline invocation, everything else is preamble
+	var pipeNode *parser.Node
+	var inlinePipe *pipeline.Pipeline
+	var rest []parser.Node
+
+	for i := range nodes {
+		if nodes[i].Type == parser.NodeInvocation {
+			// @loop(method) or @map(ref, method) as inline pipeline syntax
+			if pipeNode == nil && (nodes[i].Name == "loop" || nodes[i].Name == "map") {
+				syn := nodes[i].Name + "(" + strings.Join(nodes[i].Args, ", ") + ")"
+				if p, err := pipeline.Parse(syn); err == nil {
+					inlinePipe = p
+					continue
+				}
 			}
+			m := reg.Get(nodes[i].Name)
+			if m != nil && m.IsPipeline && pipeNode == nil {
+				pipeNode = &nodes[i]
+				continue
+			}
+		}
+		rest = append(rest, nodes[i])
+	}
+
+	compiled := expandNodes(rest, reg)
+
+	if inlinePipe != nil {
+		return &Plan{
+			Kind:     PlanPipeline,
+			Pipeline: inlinePipe,
+			Args:     make(map[string]string),
+			Preamble: compiled,
 		}
 	}
 
-	// Default: compile to single prompt string
-	var out strings.Builder
+	if pipeNode != nil {
+		m := reg.Get(pipeNode.Name)
+		return &Plan{
+			Kind:     PlanPipeline,
+			Pipeline: m.Pipeline,
+			Args:     bindArgs(m, pipeNode.Args),
+			Preamble: compiled,
+		}
+	}
 
+	return &Plan{Kind: PlanPrompt, Prompt: compiled}
+}
+
+func expandNodes(nodes []parser.Node, reg *registry.Registry) string {
+	var parts []string
 	for _, node := range nodes {
 		switch node.Type {
 		case parser.NodeInvocation:
-			if out.Len() > 0 {
-				out.WriteString("\n")
-			}
-			out.WriteString(expand(node, reg))
-
+			parts = append(parts, expand(node, reg))
 		case parser.NodePlainText:
-			if out.Len() > 0 {
-				out.WriteString("\n")
-			}
-			out.WriteString(node.Text)
+			parts = append(parts, node.Text)
 		}
 	}
-
-	return &Plan{
-		Kind:   PlanPrompt,
-		Prompt: out.String(),
-	}
+	return strings.Join(parts, "\n")
 }
 
-// bindArgs maps invocation args to method param names.
 func bindArgs(method *registry.Method, args []string) map[string]string {
 	bound := make(map[string]string)
 	positional := 0
@@ -82,7 +102,6 @@ func bindArgs(method *registry.Method, args []string) map[string]string {
 func expand(node parser.Node, reg *registry.Registry) string {
 	method := reg.Get(node.Name)
 	if method == nil {
-		// Unknown method — pass through raw
 		text := "@" + node.Name
 		if len(node.Args) > 0 {
 			text += "(" + strings.Join(node.Args, ", ") + ")"
@@ -94,8 +113,6 @@ func expand(node parser.Node, reg *registry.Registry) string {
 	}
 
 	body := method.Body
-
-	// Interpolate [param] with arg values (supports name=value and positional)
 	positional := 0
 	for _, arg := range node.Args {
 		if k, v, ok := strings.Cut(arg, "="); ok {
@@ -106,7 +123,6 @@ func expand(node parser.Node, reg *registry.Registry) string {
 		}
 	}
 
-	// Append trailing text
 	if node.Trailing != "" {
 		body += "\n" + node.Trailing
 	}

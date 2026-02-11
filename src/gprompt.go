@@ -120,7 +120,7 @@ func main() {
 
 	case compiler.PlanPipeline:
 		debug.Log("executing pipeline with %d steps, args=%v", len(plan.Pipeline.Steps), plan.Args)
-		if err := runtime.ExecutePipeline(plan.Pipeline, plan.Args, reg); err != nil {
+		if err := runtime.ExecutePipeline(plan.Pipeline, plan.Args, reg, plan.Preamble); err != nil {
 			fmt.Fprintf(os.Stderr, "\npipeline error: %v\n", err)
 			os.Exit(1)
 		}

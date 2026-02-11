@@ -4,14 +4,15 @@ p programming language
 p is a programming language/runtime for prompting
 
 ```sh
-(base) liam@rand:~/Music/p2p$ cat examples/y/y.p
+$ export PATH=$PATH:$(pwd)/src/bin
+$ cat examples/y/y.p
 @conversational
 how do trees grow?
 @listify(n=10)
 ```
 
 ```sh
-$ src/bin/gprompt -d examples/y/y.p
+$ gprompt -d examples/y/y.p
 Trees grow by adding new cells at their tips (apical meristems) and widening their trunks through a layer called the cambium. Here are 10 key points:
 
 1. Seeds germinate when moisture, warmth, and light align
@@ -30,7 +31,7 @@ It's my go at trying to build something like PHP was for web dev, but for prompt
 
 The basic idea is you define prompts in `.p` files. For example:
 
-```
+```yaml
 conversational:
 	Respond conversationally, only 3 short sentences max, and keep it light, not dense. 
 	Do not respond with bulk text unless I ask for detail. We're just talking.
@@ -51,7 +52,7 @@ A prompt file is a bit like a Python script. Where if you don't contain code wit
 
 This entire block is evaluated into one prompt. This is the compiled prompt that is run:
 
-```
+```yaml
 Respond conversationally, only 3 short sentences max, and keep it light, not dense. Do not respond with bulk text unless I ask for detail. We're just talking.
 how do trees grow?
 Convert to 10 items.
@@ -71,7 +72,7 @@ The thing is - they're not really *it*, are they? They can be slow, cumbersome, 
 
 **Writing a book is an interesting eval for "prompt runtimes".** Here's how it looks in P:
 
-```
+```yaml
 # examples/book/book.p
 book(topic):
 	topic -> brief (book-idea) -> chapter-outline (generate-chapter-index) -> chapters (map(chapters, flesh-out-chapter)) -> final (concat)
@@ -102,7 +103,7 @@ Likewise, my attempt with P is to specify how the end result of your LLM's intel
 
 A book is defined by a one-way flow of prompts, some of which are executed in parallel using `map`.
 
-```
+```yaml
 book(topic):
 	topic -> brief (book-idea) -> chapter-outline (generate-chapter-index) -> chapters (map(chapters, flesh-out-chapter)) -> final (concat)
 ```
@@ -117,9 +118,58 @@ There are some benefits to defining this workflow:
 
 For example, here's how to test an individual prompt:
 
-```
-$ ./src/bin/gprompt -d examples/book/book.p -e "@book-idea(egyptian llm's)"
+```sh
+$ gprompt -d examples/book/book.p -e "@book-idea(egyptian llm's)"
 ```
 
 Which will output for `We are writing a book about egyptian llm's. Generate a briefer on what it should cover and why it's good.`. 
 
+## Writing a Ralph loop using P.
+
+P also includes native looping support. When do you want to use looping? Well, Ralph is a pretty interesting example.
+
+Ralph is a way to build software automatically.
+
+`idea -> spec -> plan -> loop(build)`
+
+And that is exactly how it looks in P:
+
+```yaml
+ralph(idea):
+	idea -> spec -> plan -> loop(build)
+
+spec(idea):
+	Think about [idea]
+	Write a series of specifications
+	Put them in specs/*.md
+
+plan:
+	Read specs/*.md and the existing code.
+	Figure out what’s missing or wrong.
+	Write a plan in `IMPLEMENTATION_PLAN.md`
+
+build:
+	Pick the top next step from `IMPLEMENTATION_PLAN.md`.
+	Implement it, run tests, and commit.
+	Update the plan as you learn.
+
+@ralph(build a simple html todo list app)
+```
+
+You can read the full [ralph.p](./examples/ralph/ralph.p) for the Ralph prompts. 
+
+**I mean, this is cool, but it's basically the same as using `./loop.sh build`**.
+
+Well, almost. Firstly, it's nicer to organise your prompts in one file, rather than a folder full of markdown files, in my opinion. It's not like we define code as one function per file, so why do we do prompts that way?
+
+Secondly, what if we want multiple Ralph loops concurrently? 
+
+While I was learning ralph, I started building another ralph loop for bugfixing. This is different to a build prompt - bug fixes are mainly about reading bug reports, identifying a root cause, writing a repro as a test, and then finding out how to fix the bug.
+
+Still, you can do that with `./loop.sh bugfix` and `./loop.sh build`
+
+But what about supervising those loops with Claude also? What about UI's that show you what's going on here?
+
+---
+
+TBC
