@@ -186,7 +186,7 @@ bugfix:
 	**LOOP DETECTION**: If you find yourself making 3+ similar attempts without progress:
 	1. STOP and review SESSION_LOG.md
 	2. Identify the pattern (same failure mode? same wrong assumption?)
-	3. Do a full re-analysis with \ultrathink:
+	3. Do a full re-analysis with ultrathink:
 	- Re-read the original bug description
 	- Trace the code path from scratch
 	- Question your assumptions about what's happening

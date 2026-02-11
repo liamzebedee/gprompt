@@ -37,6 +37,7 @@ The basic idea is you define prompts in `.p` files. For example:
 ```yaml
 conversational:
 	Respond conversationally, only 3 short sentences max, and keep it light, not dense. 
+	
 	Do not respond with bulk text unless I ask for detail. We're just talking.
 
 listify(n):
@@ -47,9 +48,9 @@ how do trees grow?
 @listify(n=10)
 ```
 
-You can define methods like the above. Methods can have args and they are interpolated using `[]` in the body.
+You can define prompts like the above. Prompts can have args and they are interpolated using `[]` in the body.
 
-Methods are natively multiline markdown prompts. You don't have to do anything but indent them.
+Prompts are **natively multiline** markdown prompts. You don't have to do anything but indent them.
 
 A prompt file is a bit like a Python script. Where if you don't contain code within a method, it is run.
 
