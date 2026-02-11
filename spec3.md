@@ -133,13 +133,108 @@ This is usually called **agents**.
 
 If you think of Kubernetes (which is actually Greek for cybernetics, lol), Kubernetes is kind of already a digital intelligence orchestration platform. I mean - being an Nginx worker node is not necessarily Leonardo Da Vinci, but the fact is that these Kubernetes container instances live rather independently of the actual runtime itself. When you specify, "the infrastructure shall have 20 Nginx workers", you can replace "nginx workers" with "agents" and the meaning remains largely unchanged.
 
-So how should agents look in our new universe defined by P? 
+So how should agents look? 
+
+Again, let's go back to this idea of what's an interesting eval for an agent orchestration runtime? 
+
+If you start with K8s, we might think of defining a city or a village:
+
+```
+# city.p
+city:
+	100 agents (generic-agent)
+```
+
+Running `gprompt city.p` would thus connect to our master, which tells us the state of the system (0 agents), and then promptly spin up 100 agents. 
+
+What would this `generic-agent` do, exactly? One important design consideration of P was single responsibility. It's something the father of ralphing (Geoff Huntley) spoke about. Models can really focus very well at one task, and are more prone to fail when there are multiple. So what would an agent be doing? One task, I guess.
+
+```
+# city.p
+generic-agent:
+	task:
+		talk to other agents I guess???
+```
+
+(Again we're using the beauty of P being an indentation-based language. So we can have multiline markdown prompts, for free.)
+
+Talk to other agents - I mean, that's what you would do, right? But how? We haven't wired up our runtime's worth of agents. 
+
+I guess one benefit of this "YAML-like" idented syntax is we could declare multiple fields:
+
+```
+# city.p
+generic-agent:
+	task:
+		talk to other agents I guess???
+	tools:
+		...
+	memory: ...
+```
+
+This seems cool but more of an idea tarpit. I want simplicity. 
+
+Let's go back to designing one agent. What does our agent do? 
+
+ - read the news
+ - schedule things
+ - runs in a loop
+ - responds to events
+
+Generically, we could say our agent:
+
+ - receives information
+ - acts
+
+As two parallel things. 
+
+This is boring. Let's consider software engineering.
 
 
 
 
+How do we do Ralph-ing? 
+
+What are the problems we are solving? 
+
+- agents working autonomously -> loops, queues, external memory, idempotency
+- agents intelligently fixing themselves -> supervision
+- designing and adding concurrent loops and loops of loops 
+	- build agent
+	- tester agent
+	- bug fixer agent
+
+What does moltbot teach us? 
+- scheduling is a must
+- memory is a must
+- periodic memory summarisation is a must
+
+Docker:
+- encapsulation/containerisation - each step of prompting has immutable workdir
+
+K8's and Google:
+- scaling up processes - scaling up more agents
+- mapping agents onto workloads.
+
+Erlang:
+- agents communicating with other agents.
+- hot code update over the wire
 
 
 
+Ideally what you want to do: 
+Agents, subagents, etc. are all tracked by the scheduler/runtime layer
+Possible to introspect/pipe in to any agent in the terrain.
+`gprompt apply` will apply changes.
 
 
+
+## First idea for agents.
+
+Let's just begin by building a writer's studio. Let's build an autonomous NY Times. That's easier than software because all we need is writing.
+
+What might we need for a writer's studio:
+
+- information about the world (read different websites)
+- a team of 5 writers
+- 
