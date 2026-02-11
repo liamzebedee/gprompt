@@ -76,20 +76,30 @@ func main() {
 		}
 	}
 
-	// Compile into a single prompt
+	// Compile into a plan
 	debug.Log("compiling %d exec nodes", len(execNodes))
-	prompt := compiler.Compile(execNodes, reg)
-	if prompt == "" {
-		return
-	}
-	debug.LogPrompt("COMPILED", 1, prompt)
+	plan := compiler.Compile(execNodes, reg)
 
-	// Execute
-	if err := runtime.Execute(prompt); err != nil {
-		fmt.Fprintf(os.Stderr, "\nruntime error: %v\n", err)
-		os.Exit(1)
+	switch plan.Kind {
+	case compiler.PlanPrompt:
+		if plan.Prompt == "" {
+			return
+		}
+		debug.LogPrompt("COMPILED", 1, plan.Prompt)
+		if err := runtime.Execute(plan.Prompt); err != nil {
+			fmt.Fprintf(os.Stderr, "\nruntime error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println()
+
+	case compiler.PlanPipeline:
+		debug.Log("executing pipeline with %d steps, args=%v", len(plan.Pipeline.Steps), plan.Args)
+		if err := runtime.ExecutePipeline(plan.Pipeline, plan.Args, reg); err != nil {
+			fmt.Fprintf(os.Stderr, "\npipeline error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println()
 	}
-	fmt.Println()
 }
 
 func loadStdlib(reg *registry.Registry, inputFile string) {
