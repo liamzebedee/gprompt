@@ -1438,6 +1438,31 @@ func TestClearDoneAllPersistence(t *testing.T) {
 	}
 }
 
+func TestListUnfilteredReturnsCopy(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("Task A")
+	_, _ = s.Add("Task B")
+
+	items, err := s.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// Mutating the returned slice should NOT affect the store's internal state.
+	items[0].Title = "MUTATED"
+
+	got, _ := s.Get(1)
+	if got.Title == "MUTATED" {
+		t.Error("List(\"\") returned a reference to internal Items slice; callers can corrupt store state")
+	}
+	if got.Title != "Task A" {
+		t.Errorf("expected title 'Task A', got %q", got.Title)
+	}
+}
+
 func TestUndoPersistsToDisk(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })
@@ -1469,5 +1494,363 @@ func TestUndoPersistsToDisk(t *testing.T) {
 	}
 	if s2.Items[0].Title != "Persist me" {
 		t.Errorf("expected 'Persist me', got %q", s2.Items[0].Title)
+	}
+}
+
+// --- Tag tests ---
+
+func TestAddFullWithTags(t *testing.T) {
+	s := tempStore(t)
+	item, err := s.AddFullWithTags("Tagged task", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d", len(item.Tags))
+	}
+	if item.Tags[0] != "work" || item.Tags[1] != "urgent" {
+		t.Errorf("expected [work, urgent], got %v", item.Tags)
+	}
+}
+
+func TestAddFullWithTagsNormalisesToLowercase(t *testing.T) {
+	s := tempStore(t)
+	item, err := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"Work", "URGENT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Tags[0] != "work" || item.Tags[1] != "urgent" {
+		t.Errorf("expected lowercase tags, got %v", item.Tags)
+	}
+}
+
+func TestAddFullWithTagsDeduplicates(t *testing.T) {
+	s := tempStore(t)
+	item, err := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work", "Work", "WORK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Tags) != 1 {
+		t.Errorf("expected 1 tag after dedup, got %d: %v", len(item.Tags), item.Tags)
+	}
+}
+
+func TestAddFullWithTagsTrimsWhitespace(t *testing.T) {
+	s := tempStore(t)
+	item, err := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"  work  ", " ", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Tags) != 1 {
+		t.Errorf("expected 1 tag after trimming empties, got %d: %v", len(item.Tags), item.Tags)
+	}
+	if item.Tags[0] != "work" {
+		t.Errorf("expected 'work', got %q", item.Tags[0])
+	}
+}
+
+func TestAddFullWithNilTags(t *testing.T) {
+	s := tempStore(t)
+	item, err := s.AddFullWithTags("Task", PriorityNone, DueDate{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Tags) != 0 {
+		t.Errorf("expected 0 tags, got %d", len(item.Tags))
+	}
+}
+
+func TestAddTag(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	if err := s.AddTag(item.ID, "work"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(item.ID)
+	if len(got.Tags) != 1 || got.Tags[0] != "work" {
+		t.Errorf("expected [work], got %v", got.Tags)
+	}
+}
+
+func TestAddTagDuplicateIgnored(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	s.AddTag(item.ID, "work")
+	s.AddTag(item.ID, "Work")   // case-insensitive duplicate
+	s.AddTag(item.ID, "  work") // whitespace duplicate
+	got, _ := s.Get(item.ID)
+	if len(got.Tags) != 1 {
+		t.Errorf("expected 1 tag (no duplicates), got %d: %v", len(got.Tags), got.Tags)
+	}
+}
+
+func TestAddTagRejectsEmpty(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	if err := s.AddTag(item.ID, ""); err == nil {
+		t.Fatal("expected error for empty tag")
+	}
+	if err := s.AddTag(item.ID, "   "); err == nil {
+		t.Fatal("expected error for whitespace-only tag")
+	}
+}
+
+func TestAddTagNotFound(t *testing.T) {
+	s := tempStore(t)
+	if err := s.AddTag(999, "work"); err == nil {
+		t.Fatal("expected error for non-existent item")
+	}
+}
+
+func TestRemoveTag(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	if err := s.RemoveTag(item.ID, "work"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(item.ID)
+	if len(got.Tags) != 1 || got.Tags[0] != "urgent" {
+		t.Errorf("expected [urgent], got %v", got.Tags)
+	}
+}
+
+func TestRemoveTagCaseInsensitive(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work"})
+	if err := s.RemoveTag(item.ID, "WORK"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(item.ID)
+	if len(got.Tags) != 0 {
+		t.Errorf("expected 0 tags after removal, got %v", got.Tags)
+	}
+}
+
+func TestRemoveTagNotPresent(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	if err := s.RemoveTag(item.ID, "nonexistent"); err == nil {
+		t.Fatal("expected error removing tag that doesn't exist")
+	}
+}
+
+func TestRemoveTagRejectsEmpty(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	if err := s.RemoveTag(item.ID, ""); err == nil {
+		t.Fatal("expected error for empty tag")
+	}
+}
+
+func TestRemoveTagNotFound(t *testing.T) {
+	s := tempStore(t)
+	if err := s.RemoveTag(999, "work"); err == nil {
+		t.Fatal("expected error for non-existent item")
+	}
+}
+
+func TestHasTag(t *testing.T) {
+	item := &Item{Tags: []string{"work", "urgent"}}
+	if !item.HasTag("work") {
+		t.Error("expected HasTag('work') to be true")
+	}
+	if !item.HasTag("WORK") {
+		t.Error("expected HasTag('WORK') to be true (case-insensitive)")
+	}
+	if item.HasTag("personal") {
+		t.Error("expected HasTag('personal') to be false")
+	}
+}
+
+func TestHasTagEmptyTags(t *testing.T) {
+	item := &Item{}
+	if item.HasTag("work") {
+		t.Error("expected HasTag to be false for item with no tags")
+	}
+}
+
+func TestListByTag(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Work task 1", PriorityNone, DueDate{}, []string{"work"})
+	s.AddFullWithTags("Work task 2", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	s.Add("Personal task")
+
+	items, err := s.ListByTag("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items with tag 'work', got %d", len(items))
+	}
+}
+
+func TestListByTagCaseInsensitive(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work"})
+
+	items, err := s.ListByTag("WORK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+}
+
+func TestListByTagEmpty(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.ListByTag("")
+	if err == nil {
+		t.Fatal("expected error for empty tag filter")
+	}
+}
+
+func TestListByTagNoMatches(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Task without tags")
+	items, err := s.ListByTag("nonexistent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(items))
+	}
+}
+
+func TestTagsPersistence(t *testing.T) {
+	f, err := os.CreateTemp("", "todo-tags-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	s1 := NewStore(f.Name())
+	s1.Load()
+	_, _ = s1.AddFullWithTags("Tagged task", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	if err := s1.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := NewStore(f.Name())
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(s2.Items))
+	}
+	if len(s2.Items[0].Tags) != 2 {
+		t.Fatalf("expected 2 tags after reload, got %d", len(s2.Items[0].Tags))
+	}
+	if s2.Items[0].Tags[0] != "work" || s2.Items[0].Tags[1] != "urgent" {
+		t.Errorf("expected [work, urgent] after reload, got %v", s2.Items[0].Tags)
+	}
+}
+
+func TestTagsOmittedWhenEmpty(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("No tags")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := NewStore(s.file)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Items[0].Tags) != 0 {
+		t.Errorf("expected 0 tags, got %v", s2.Items[0].Tags)
+	}
+}
+
+func TestExportIncludesTagsFromAddFullWithTags(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Tagged", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	_, _ = s.Add("No tags")
+
+	var buf bytes.Buffer
+	if err := s.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	r := csv.NewReader(&buf)
+	records, err := r.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check header includes tags
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	for i, col := range expectedHeader {
+		if records[0][i] != col {
+			t.Errorf("header[%d]: expected %q, got %q", i, col, records[0][i])
+		}
+	}
+
+	// Check tags column (index 5)
+	if records[1][5] != "work;urgent" {
+		t.Errorf("expected tags 'work;urgent', got %q", records[1][5])
+	}
+	if records[2][5] != "" {
+		t.Errorf("expected empty tags for untagged item, got %q", records[2][5])
+	}
+}
+
+func TestFormatTags(t *testing.T) {
+	if got := FormatTags(nil); got != "-" {
+		t.Errorf("expected '-' for nil tags, got %q", got)
+	}
+	if got := FormatTags([]string{}); got != "-" {
+		t.Errorf("expected '-' for empty tags, got %q", got)
+	}
+	if got := FormatTags([]string{"work"}); got != "work" {
+		t.Errorf("expected 'work', got %q", got)
+	}
+	if got := FormatTags([]string{"work", "urgent"}); got != "work, urgent" {
+		t.Errorf("expected 'work, urgent', got %q", got)
+	}
+}
+
+func TestValidTag(t *testing.T) {
+	if ValidTag("") {
+		t.Error("expected empty string to be invalid")
+	}
+	if ValidTag("   ") {
+		t.Error("expected whitespace-only to be invalid")
+	}
+	if !ValidTag("work") {
+		t.Error("expected 'work' to be valid")
+	}
+	if !ValidTag("  work  ") {
+		t.Error("expected '  work  ' to be valid (trimmable)")
+	}
+}
+
+func TestUndoRestoresTags(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.AddFullWithTags("Tagged", PriorityNone, DueDate{}, []string{"work"})
+	s.Save()
+
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTag(1, "urgent"); err != nil {
+		t.Fatal(err)
+	}
+	s.Save()
+
+	got, _ := s.Get(1)
+	if len(got.Tags) != 2 {
+		t.Fatalf("expected 2 tags before undo, got %d", len(got.Tags))
+	}
+
+	if err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get(1)
+	if len(got.Tags) != 1 || got.Tags[0] != "work" {
+		t.Errorf("expected [work] after undo, got %v", got.Tags)
 	}
 }

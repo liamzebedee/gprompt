@@ -395,17 +395,19 @@ func (s *Store) Export(w io.Writer) error {
 	defer cw.Flush()
 
 	// Header row
-	if err := cw.Write([]string{"id", "title", "status", "priority", "due_date", "created_at", "updated_at"}); err != nil {
+	if err := cw.Write([]string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}); err != nil {
 		return err
 	}
 
 	for _, item := range s.Items {
+		tagsStr := strings.Join(item.Tags, ";")
 		record := []string{
 			strconv.Itoa(item.ID),
 			item.Title,
 			string(item.Status),
 			string(item.Priority),
 			item.DueDate.String(),
+			tagsStr,
 			item.CreatedAt.Format(time.RFC3339),
 			item.UpdatedAt.Format(time.RFC3339),
 		}
@@ -510,7 +512,9 @@ func (s *Store) Sort(field SortField) error {
 
 func (s *Store) List(filter Status) ([]Item, error) {
 	if filter == "" {
-		return s.Items, nil
+		result := make([]Item, len(s.Items))
+		copy(result, s.Items)
+		return result, nil
 	}
 	if !ValidStatus(filter) {
 		return nil, fmt.Errorf("invalid status filter: %q (valid values: pending, in_progress, done)", filter)
@@ -600,6 +604,89 @@ func (s *Store) ListByTag(tag string) ([]Item, error) {
 		}
 	}
 	return result, nil
+}
+
+// Import reads items from a CSV reader and adds them to the store.
+// The CSV must have a header row matching the export format:
+// id, title, status, priority, due_date, tags, created_at, updated_at.
+// Imported items receive new IDs; the original IDs are ignored.
+// Returns the number of items imported and any error encountered.
+func (s *Store) Import(r io.Reader) (int, error) {
+	cr := csv.NewReader(r)
+
+	// Read and validate header.
+	header, err := cr.Read()
+	if err != nil {
+		if err == io.EOF {
+			return 0, fmt.Errorf("empty CSV file")
+		}
+		return 0, fmt.Errorf("reading CSV header: %w", err)
+	}
+	expected := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	if len(header) != len(expected) {
+		return 0, fmt.Errorf("CSV header has %d columns, expected %d", len(header), len(expected))
+	}
+	for i, col := range expected {
+		if strings.TrimSpace(strings.ToLower(header[i])) != col {
+			return 0, fmt.Errorf("CSV column %d: expected %q, got %q", i+1, col, header[i])
+		}
+	}
+
+	count := 0
+	for {
+		record, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return count, fmt.Errorf("reading CSV row %d: %w", count+2, err)
+		}
+		if len(record) != len(expected) {
+			return count, fmt.Errorf("CSV row %d has %d columns, expected %d", count+2, len(record), len(expected))
+		}
+
+		title := strings.TrimSpace(record[1])
+		if title == "" {
+			return count, fmt.Errorf("CSV row %d: title must not be empty", count+2)
+		}
+
+		status := Status(strings.TrimSpace(record[2]))
+		if !ValidStatus(status) {
+			return count, fmt.Errorf("CSV row %d: invalid status %q", count+2, record[2])
+		}
+
+		priority := Priority(strings.TrimSpace(record[3]))
+		if !ValidPriority(priority) {
+			return count, fmt.Errorf("CSV row %d: invalid priority %q", count+2, record[3])
+		}
+
+		due, err := ParseDueDate(strings.TrimSpace(record[4]))
+		if err != nil {
+			return count, fmt.Errorf("CSV row %d: %w", count+2, err)
+		}
+
+		var tags []string
+		tagsStr := strings.TrimSpace(record[5])
+		if tagsStr != "" {
+			tags = strings.Split(tagsStr, ";")
+		}
+
+		now := time.Now()
+		item := Item{
+			ID:        s.nextID(),
+			Title:     title,
+			Status:    status,
+			Priority:  priority,
+			DueDate:   due,
+			Tags:      normaliseTags(tags),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		s.Items = append(s.Items, item)
+		count++
+	}
+
+	return count, nil
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.
