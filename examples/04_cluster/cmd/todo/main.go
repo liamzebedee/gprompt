@@ -22,6 +22,7 @@ Commands:
   list [--tag TAG] [status]
                       List items (optional filter: pending|in_progress|done)
   done <id>           Mark an item as done
+  bulk-done <id>...   Mark multiple items as done at once
   start <id>          Mark an item as in progress
   delete <id>         Delete an item
   show <id>          Show detailed info for an item
@@ -40,6 +41,7 @@ Commands:
   overdue             List items that are past their due date
   upcoming [days]     List items due today or within N days (default: 7)
   sort <field>        Sort items by: priority, due, status, created
+  duplicate <id>      Duplicate an item as a new pending copy
   swap <id1> <id2>    Swap the position of two items in the list
   archive             Move completed items to an archive file
   clear               Remove all completed items
@@ -190,6 +192,39 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Marked #%d as done.\n", id)
+
+	case "bulk-done":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: todo bulk-done <id1> <id2> ...")
+			os.Exit(1)
+		}
+		var ids []int
+		for _, arg := range os.Args[2:] {
+			id, err := strconv.Atoi(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", arg)
+				os.Exit(1)
+			}
+			ids = append(ids, id)
+		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		changed, err := store.BulkDone(ids)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		if changed == 0 {
+			fmt.Println("All specified items were already done.")
+		} else {
+			fmt.Printf("Marked %d item(s) as done.\n", changed)
+		}
 
 	case "start":
 		id := requireID()
@@ -578,6 +613,23 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Swapped #%d and #%d.\n", id1, id2)
+
+	case "duplicate":
+		id := requireID()
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		dup, err := store.Duplicate(id)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Duplicated #%d → #%d: %s\n", id, dup.ID, dup.Title)
 
 	case "archive":
 		if err := store.Snapshot(); err != nil {

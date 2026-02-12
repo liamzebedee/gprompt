@@ -902,6 +902,74 @@ func (s *Store) Swap(id1, id2 int) error {
 	return nil
 }
 
+// BulkDone marks multiple items as done in a single operation. It requires at
+// least one ID. All IDs are validated before any changes are made so the
+// operation is atomic — either all items are marked done or none are.
+// Returns the number of items whose status actually changed.
+func (s *Store) BulkDone(ids []int) (int, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("at least one ID is required")
+	}
+	// Check for duplicate IDs.
+	seen := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return 0, fmt.Errorf("duplicate ID: %d", id)
+		}
+		seen[id] = true
+	}
+	// Validate that all IDs exist before making any changes.
+	items := make([]*Item, 0, len(ids))
+	for _, id := range ids {
+		item, err := s.Get(id)
+		if err != nil {
+			return 0, err
+		}
+		items = append(items, item)
+	}
+	// Apply changes.
+	now := time.Now()
+	changed := 0
+	for _, item := range items {
+		if item.Status != StatusDone {
+			item.Status = StatusDone
+			item.UpdatedAt = now
+			changed++
+		}
+	}
+	return changed, nil
+}
+
+// Duplicate creates a new pending item that copies the title, priority, due date,
+// tags, and note from the item with the given ID. The new item gets a fresh ID
+// and timestamps. Returns the newly created item.
+func (s *Store) Duplicate(id int) (Item, error) {
+	src, err := s.Get(id)
+	if err != nil {
+		return Item{}, err
+	}
+	// Copy tags slice to avoid sharing the backing array.
+	var tags []string
+	if len(src.Tags) > 0 {
+		tags = make([]string, len(src.Tags))
+		copy(tags, src.Tags)
+	}
+	now := time.Now()
+	item := Item{
+		ID:        s.nextID(),
+		Title:     src.Title,
+		Status:    StatusPending,
+		Priority:  src.Priority,
+		DueDate:   src.DueDate,
+		Tags:      tags,
+		Note:      src.Note,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.Items = append(s.Items, item)
+	return item, nil
+}
+
 // FormatTags returns a comma-separated string of tags, or "-" if empty.
 func FormatTags(tags []string) string {
 	if len(tags) == 0 {

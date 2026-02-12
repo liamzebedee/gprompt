@@ -2696,3 +2696,167 @@ func TestUndoRestoresTags(t *testing.T) {
 		t.Errorf("expected [work] after undo, got %v", got.Tags)
 	}
 }
+
+// --- Duplicate tests ---
+
+func TestDuplicateBasic(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2025-08-01")
+	orig, _ := s.AddFullWithTags("Original task", PriorityHigh, due, []string{"work", "urgent"})
+	s.SetNote(orig.ID, "some notes")
+
+	dup, err := s.Duplicate(orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.ID == orig.ID {
+		t.Error("duplicate should have a different ID")
+	}
+	if dup.Title != orig.Title {
+		t.Errorf("expected title %q, got %q", orig.Title, dup.Title)
+	}
+	if dup.Status != StatusPending {
+		t.Errorf("expected status pending, got %s", dup.Status)
+	}
+	if dup.Priority != PriorityHigh {
+		t.Errorf("expected priority high, got %q", dup.Priority)
+	}
+	if !dup.DueDate.Valid || dup.DueDate.String() != "2025-08-01" {
+		t.Errorf("expected due date 2025-08-01, got %q", dup.DueDate.String())
+	}
+	if len(dup.Tags) != 2 || dup.Tags[0] != "work" || dup.Tags[1] != "urgent" {
+		t.Errorf("expected tags [work urgent], got %v", dup.Tags)
+	}
+	if dup.Note != "some notes" {
+		t.Errorf("expected note 'some notes', got %q", dup.Note)
+	}
+}
+
+func TestDuplicateResetsStatusToPending(t *testing.T) {
+	s := tempStore(t)
+	orig, _ := s.Add("Done task")
+	s.SetStatus(orig.ID, StatusDone)
+
+	dup, err := s.Duplicate(orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dup.Status != StatusPending {
+		t.Errorf("expected duplicated item to be pending, got %s", dup.Status)
+	}
+}
+
+func TestDuplicateNotFound(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.Duplicate(999)
+	if err == nil {
+		t.Fatal("expected error for non-existent ID")
+	}
+}
+
+func TestDuplicateTagsIndependent(t *testing.T) {
+	s := tempStore(t)
+	orig, _ := s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work"})
+
+	dup, err := s.Duplicate(orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Modifying tags on the duplicate should not affect the original.
+	s.AddTag(dup.ID, "extra")
+	origItem, _ := s.Get(orig.ID)
+	if len(origItem.Tags) != 1 {
+		t.Errorf("expected original to still have 1 tag, got %d: %v", len(origItem.Tags), origItem.Tags)
+	}
+}
+
+func TestDuplicateGetsNewTimestamps(t *testing.T) {
+	s := tempStore(t)
+	orig, _ := s.Add("Old task")
+
+	// Small sleep to ensure timestamps differ.
+	time.Sleep(10 * time.Millisecond)
+
+	dup, err := s.Duplicate(orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dup.CreatedAt.After(orig.CreatedAt) && !dup.CreatedAt.Equal(orig.CreatedAt) {
+		t.Errorf("expected duplicate CreatedAt >= original, got %v vs %v", dup.CreatedAt, orig.CreatedAt)
+	}
+}
+
+func TestDuplicateNoTags(t *testing.T) {
+	s := tempStore(t)
+	orig, _ := s.Add("Simple task")
+
+	dup, err := s.Duplicate(orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dup.Tags) != 0 {
+		t.Errorf("expected 0 tags on duplicate, got %v", dup.Tags)
+	}
+}
+
+func TestDuplicateIncrementsStoreCount(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Task")
+
+	if len(s.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(s.Items))
+	}
+
+	s.Duplicate(1)
+
+	if len(s.Items) != 2 {
+		t.Fatalf("expected 2 items after duplicate, got %d", len(s.Items))
+	}
+}
+
+func TestArchiveAllDonePersistence(t *testing.T) {
+	f, err := os.CreateTemp("", "todo-archive-all-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	s := NewStore(f.Name())
+	s.Load()
+	t.Cleanup(func() { os.Remove(s.archiveFile()) })
+
+	item1, _ := s.Add("Task A")
+	item2, _ := s.Add("Task B")
+	_ = s.SetStatus(item1.ID, StatusDone)
+	_ = s.SetStatus(item2.ID, StatusDone)
+
+	count, err := s.Archive()
+	if err != nil {
+		t.Fatalf("Archive failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 archived, got %d", count)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save after archive failed: %v", err)
+	}
+
+	// Reload — should succeed and have 0 items, not fail to parse.
+	// This catches the nil-slice bug where s.Items becomes nil after
+	// archiving all items, causing Save to write "items": null in JSON.
+	s2 := NewStore(f.Name())
+	if err := s2.Load(); err != nil {
+		t.Fatalf("failed to load after Archive removed all items: %v", err)
+	}
+	if len(s2.Items) != 0 {
+		t.Errorf("expected 0 items after reload, got %d", len(s2.Items))
+	}
+
+	// NextID should be preserved so new items don't reuse old IDs.
+	newItem, _ := s2.Add("Task C")
+	if newItem.ID <= item2.ID {
+		t.Errorf("expected new ID > %d, got %d", item2.ID, newItem.ID)
+	}
+}
