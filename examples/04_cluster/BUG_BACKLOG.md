@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `Upcoming` accepts negative `days` values without error — silently returns empty results instead of rejecting with an error like other validated inputs
+
 - [x] `List` with empty filter returns direct reference to internal `Items` slice — callers can mutate store state; filtered lists return safe copies
 
 - [x] `Export` CSV tests (`TestExportWithItems`, `TestExportIncludesDueDate`) use stale 7-column expected header missing "tags" — tests fail because `Export` now writes 8 columns including tags
