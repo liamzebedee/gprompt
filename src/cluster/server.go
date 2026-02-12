@@ -37,8 +37,14 @@ type Server struct {
 
 	// agentMethods caches the resolved method bodies for each agent,
 	// keyed by agent name → (method name → method body). Populated
-	// by apply requests so the executor can start agents.
+	// by apply requests so the executor can start agents and so steer
+	// clients can display human-readable method text.
 	agentMethods map[string]map[string]string
+
+	// agentPipelines caches the pipeline definitions for each agent,
+	// keyed by agent name. Populated by apply requests so steer clients
+	// can render pipeline-aware tree views.
+	agentPipelines map[string]*PipelineDef
 
 	// done is closed when the server stops
 	done chan struct{}
@@ -54,11 +60,12 @@ func NewServer(store *Store, addr string, claudeFn ...ClaudeFunc) *Server {
 		addr = DefaultAddr
 	}
 	s := &Server{
-		store:        store,
-		addr:         addr,
-		steerClients: make(map[net.Conn]bool),
-		agentMethods: make(map[string]map[string]string),
-		done:         make(chan struct{}),
+		store:          store,
+		addr:           addr,
+		steerClients:   make(map[net.Conn]bool),
+		agentMethods:   make(map[string]map[string]string),
+		agentPipelines: make(map[string]*PipelineDef),
+		done:           make(chan struct{}),
 	}
 
 	// Create executor if a claude function was provided.
@@ -201,11 +208,15 @@ func (s *Server) handleApply(conn net.Conn, env *Envelope) {
 	}
 
 	// Cache method bodies and pipeline definitions from the apply request
-	// for executor use when starting agents.
+	// for executor use when starting agents, and for steer clients to
+	// display human-readable method text and pipeline structure.
 	s.mu.Lock()
 	for _, def := range req.Agents {
 		if len(def.Methods) > 0 {
 			s.agentMethods[def.Name] = def.Methods
+		}
+		if def.Pipeline != nil {
+			s.agentPipelines[def.Name] = def.Pipeline
 		}
 	}
 	s.mu.Unlock()
@@ -248,6 +259,21 @@ func (s *Server) handleSteerSubscribe(conn net.Conn) {
 	if s.executor != nil {
 		payload.Runs = s.executor.Snapshot()
 	}
+	// Include cached methods and pipelines so TUI can display them.
+	s.mu.Lock()
+	if len(s.agentMethods) > 0 {
+		payload.Methods = make(map[string]map[string]string, len(s.agentMethods))
+		for k, v := range s.agentMethods {
+			payload.Methods[k] = v
+		}
+	}
+	if len(s.agentPipelines) > 0 {
+		payload.Pipelines = make(map[string]*PipelineDef, len(s.agentPipelines))
+		for k, v := range s.agentPipelines {
+			payload.Pipelines[k] = v
+		}
+	}
+	s.mu.Unlock()
 	s.sendResponse(conn, MsgSteerState, payload)
 
 	// Keep connection alive — read until EOF or error
@@ -303,6 +329,23 @@ func (s *Server) pushState(objects []ClusterObject) {
 	if s.executor != nil {
 		payload.Runs = s.executor.Snapshot()
 	}
+
+	// Grab cached methods and pipelines under s.mu so TUI can display them.
+	s.mu.Lock()
+	if len(s.agentMethods) > 0 {
+		payload.Methods = make(map[string]map[string]string, len(s.agentMethods))
+		for k, v := range s.agentMethods {
+			payload.Methods[k] = v
+		}
+	}
+	if len(s.agentPipelines) > 0 {
+		payload.Pipelines = make(map[string]*PipelineDef, len(s.agentPipelines))
+		for k, v := range s.agentPipelines {
+			payload.Pipelines[k] = v
+		}
+	}
+	s.mu.Unlock()
+
 	env, err := NewEnvelope(MsgSteerState, payload)
 	if err != nil {
 		log.Printf("pushState marshal error: %v", err)

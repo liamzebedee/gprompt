@@ -44,9 +44,15 @@ type SteerSubscribeRequest struct{}
 // Objects contains the declarative state (definitions, revisions, run state).
 // Runs contains runtime iteration data for running agents — this is ephemeral
 // and NOT persisted to disk, only sent to steer clients for observation.
+// Methods contains resolved method bodies per agent (agent name → method name → body).
+// Pipelines contains pipeline structure per agent (agent name → PipelineDef).
+// Both are populated from the server's cache (set at apply time) so the TUI
+// can display human-readable method text and pipeline-aware tree structure.
 type SteerStatePayload struct {
-	Objects []ClusterObject            `json:"objects"`
-	Runs    map[string]AgentRunSnapshot `json:"runs,omitempty"`
+	Objects   []ClusterObject                `json:"objects"`
+	Runs      map[string]AgentRunSnapshot    `json:"runs,omitempty"`
+	Methods   map[string]map[string]string   `json:"methods,omitempty"`
+	Pipelines map[string]*PipelineDef        `json:"pipelines,omitempty"`
 }
 
 // SteerInjectRequest sends a human message into an agent's conversation.

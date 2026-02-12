@@ -73,8 +73,10 @@ type TUIModel struct {
 	client *SteerClient
 
 	// State from master
-	objects []ClusterObject
-	runs    map[string]AgentRunSnapshot
+	objects   []ClusterObject
+	runs      map[string]AgentRunSnapshot
+	methods   map[string]map[string]string // agent name → method name → body
+	pipelines map[string]*PipelineDef      // agent name → pipeline structure
 
 	// Tree
 	tree     []*TreeNode // root nodes (agents)
@@ -86,8 +88,12 @@ type TUIModel struct {
 	searchQuery string
 
 	// Message input (for injection in iteration view)
-	msgInput    textinput.Model
+	msgInput     textinput.Model
 	inputFocused bool // true = focus on input, false = focus on tree
+
+	// Scroll offset for iteration detail view (long chat history).
+	// 0 = show from top. Increases as user scrolls down.
+	scrollOffset int
 
 	// Terminal dimensions
 	width  int
@@ -111,10 +117,12 @@ func NewTUIModel(client *SteerClient) TUIModel {
 	mi.CharLimit = 4096
 
 	return TUIModel{
-		client:      client,
+		client:    client,
 		searchInput: si,
 		msgInput:    mi,
-		runs:        make(map[string]AgentRunSnapshot),
+		runs:      make(map[string]AgentRunSnapshot),
+		methods:   make(map[string]map[string]string),
+		pipelines: make(map[string]*PipelineDef),
 	}
 }
 
@@ -175,6 +183,12 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.objects = payload.Objects
 		if payload.Runs != nil {
 			m.runs = payload.Runs
+		}
+		if payload.Methods != nil {
+			m.methods = payload.Methods
+		}
+		if payload.Pipelines != nil {
+			m.pipelines = payload.Pipelines
 		}
 		m.ready = true
 		m.rebuildTree()
@@ -281,10 +295,19 @@ func (m *TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
+			m.scrollOffset = 0 // reset scroll when changing selection
 		}
 	case "down", "j":
 		if m.cursor < len(m.flatTree)-1 {
 			m.cursor++
+			m.scrollOffset = 0
+		}
+	case "pgdown":
+		m.scrollOffset += 10
+	case "pgup":
+		m.scrollOffset -= 10
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
 		}
 	case "right", "l":
 		if m.cursor >= 0 && m.cursor < len(m.flatTree) {
@@ -345,48 +368,103 @@ func (m *TUIModel) rebuildTree() {
 			Depth:     0,
 		}
 
-		// Find the loop method for this agent from run data
 		run, hasRun := m.runs[obj.Name]
 
-		// Determine loop step label from the agent definition.
-		// For a simple loop(method) agent, we extract the method name.
-		stepLabel := extractLoopMethod(obj.Definition)
-		if stepLabel == "" {
-			stepLabel = "loop"
-		}
+		// Build step nodes from pipeline structure if available.
+		// This makes the tree pipeline-aware: multi-step pipelines show
+		// all steps (simple, map, loop), not just the loop.
+		pdef := m.pipelines[obj.Name]
+		if pdef != nil && len(pdef.Steps) > 0 {
+			for _, step := range pdef.Steps {
+				var label string
+				var stepLabel string
+				switch step.Kind {
+				case StepKindLoop:
+					stepLabel = step.LoopMethod
+					label = fmt.Sprintf("loop(%s)", stepLabel)
+				case StepKindMap:
+					stepLabel = step.MapMethod
+					label = fmt.Sprintf("map(%s)", stepLabel)
+				case StepKindSimple:
+					stepLabel = step.Method
+					label = step.Label
+				default:
+					stepLabel = step.Label
+					label = step.Label
+				}
 
-		loopNode := &TreeNode{
-			Kind:      NodeLoop,
-			Label:     fmt.Sprintf("loop(%s)", stepLabel),
-			AgentName: obj.Name,
-			StepLabel: stepLabel,
-			Expanded:  true,
-			Depth:     1,
-		}
-
-		// Add iteration children (most recent first, max 4)
-		if hasRun && len(run.Iterations) > 0 {
-			iters := run.Iterations
-			start := 0
-			if len(iters) > 4 {
-				start = len(iters) - 4
-			}
-			for i := len(iters) - 1; i >= start; i-- {
-				ir := iters[i]
-				label := fmt.Sprintf("iteration %d", ir.Iteration)
-				iterNode := &TreeNode{
-					Kind:      NodeIteration,
+				stepNode := &TreeNode{
+					Kind:      NodeLoop, // reuse NodeLoop for all step types
 					Label:     label,
 					AgentName: obj.Name,
 					StepLabel: stepLabel,
-					Iteration: ir.Iteration,
-					Depth:     2,
+					Expanded:  true,
+					Depth:     1,
 				}
-				loopNode.Children = append(loopNode.Children, iterNode)
+
+				// Only loop steps show iteration children
+				if step.Kind == StepKindLoop && hasRun && len(run.Iterations) > 0 {
+					iters := run.Iterations
+					start := 0
+					if len(iters) > 4 {
+						start = len(iters) - 4
+					}
+					for i := len(iters) - 1; i >= start; i-- {
+						ir := iters[i]
+						iterNode := &TreeNode{
+							Kind:      NodeIteration,
+							Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+							AgentName: obj.Name,
+							StepLabel: stepLabel,
+							Iteration: ir.Iteration,
+							Depth:     2,
+						}
+						stepNode.Children = append(stepNode.Children, iterNode)
+					}
+				}
+
+				agentNode.Children = append(agentNode.Children, stepNode)
 			}
+		} else {
+			// Fallback: extract loop method from S-expression definition
+			// (legacy agents without pipeline structure).
+			stepLabel := extractLoopMethod(obj.Definition)
+			if stepLabel == "" {
+				stepLabel = "loop"
+			}
+
+			loopNode := &TreeNode{
+				Kind:      NodeLoop,
+				Label:     fmt.Sprintf("loop(%s)", stepLabel),
+				AgentName: obj.Name,
+				StepLabel: stepLabel,
+				Expanded:  true,
+				Depth:     1,
+			}
+
+			if hasRun && len(run.Iterations) > 0 {
+				iters := run.Iterations
+				start := 0
+				if len(iters) > 4 {
+					start = len(iters) - 4
+				}
+				for i := len(iters) - 1; i >= start; i-- {
+					ir := iters[i]
+					iterNode := &TreeNode{
+						Kind:      NodeIteration,
+						Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+						AgentName: obj.Name,
+						StepLabel: stepLabel,
+						Iteration: ir.Iteration,
+						Depth:     2,
+					}
+					loopNode.Children = append(loopNode.Children, iterNode)
+				}
+			}
+
+			agentNode.Children = []*TreeNode{loopNode}
 		}
 
-		agentNode.Children = []*TreeNode{loopNode}
 		nodes = append(nodes, agentNode)
 	}
 
@@ -702,12 +780,23 @@ func (m TUIModel) renderLoopView(node *TreeNode, width, height int) string {
 	promptContent.WriteString(labelStyle.Render("Prompt"))
 	promptContent.WriteString("\n\n")
 
-	// Find agent definition to show the method body
-	for _, obj := range m.objects {
-		if obj.Name == node.AgentName {
-			// Show definition
-			promptContent.WriteString(obj.Definition)
-			break
+	// Show the resolved method body text if available. This is the human-readable
+	// prompt text the agent actually uses, not the raw S-expression definition.
+	// Falls back to the S-expression if no resolved method body is cached.
+	displayed := false
+	if methods, ok := m.methods[node.AgentName]; ok {
+		if body, ok := methods[node.StepLabel]; ok {
+			promptContent.WriteString(body)
+			displayed = true
+		}
+	}
+	if !displayed {
+		// Fallback to raw definition
+		for _, obj := range m.objects {
+			if obj.Name == node.AgentName {
+				promptContent.WriteString(obj.Definition)
+				break
+			}
 		}
 	}
 
@@ -806,26 +895,46 @@ func (m TUIModel) renderIterationView(node *TreeNode, width, height int) string 
 }
 
 // withInput appends the message input box to iteration view content.
+// The content is scrollable via m.scrollOffset (Page Up/Down keys).
+// Per spec: "Very long chat history: The LoopIterationView scrolls.
+// It does not truncate or drop messages."
 func (m TUIModel) withInput(content string, node *TreeNode, width, height int) string {
-	// Calculate space for input
-	lines := strings.Count(content, "\n")
 	inputHeight := 3 // separator + input + padding
-
-	// Ensure content doesn't overflow
 	maxContentLines := height - inputHeight
 	if maxContentLines < 3 {
 		maxContentLines = 3
 	}
+
 	contentLines := strings.Split(content, "\n")
-	if len(contentLines) > maxContentLines {
-		// Scroll to show the most recent content
-		contentLines = contentLines[len(contentLines)-maxContentLines:]
-		content = strings.Join(contentLines, "\n")
-		_ = lines // suppress unused warning
+	totalLines := len(contentLines)
+
+	// Clamp scroll offset to valid range
+	maxScroll := totalLines - maxContentLines
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	offset := m.scrollOffset
+	if offset > maxScroll {
+		offset = maxScroll
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
+	// Show the visible window of content lines
+	endIdx := offset + maxContentLines
+	if endIdx > totalLines {
+		endIdx = totalLines
+	}
+	visibleLines := contentLines[offset:endIdx]
+
 	var sb strings.Builder
-	sb.WriteString(content)
+	sb.WriteString(strings.Join(visibleLines, "\n"))
+
+	// Show scroll indicator if content overflows
+	if totalLines > maxContentLines {
+		sb.WriteString(fmt.Sprintf("\n[%d-%d of %d lines]", offset+1, endIdx, totalLines))
+	}
 
 	// Separator
 	sb.WriteString("\n")

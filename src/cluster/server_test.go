@@ -409,6 +409,70 @@ func TestServerInjectForwarding(t *testing.T) {
 	}
 }
 
+// TestServerSteerStateIncludesMethodsAndPipelines verifies that steer state
+// pushes include cached method bodies and pipeline definitions from apply
+// requests, so the TUI can display human-readable method text and
+// pipeline-aware tree structure.
+func TestServerSteerStateIncludesMethodsAndPipelines(t *testing.T) {
+	srv, _, cleanup := startTestServer(t)
+	defer cleanup()
+
+	// Apply an agent with methods and pipeline
+	conn1, scanner1 := dial(t, srv.Addr())
+	sendEnvelope(t, conn1, MsgApplyRequest, ApplyRequest{
+		Agents: []AgentDef{
+			{
+				Name:       "planner",
+				ID:         "abc123",
+				Definition: `(defagent "planner" ...)`,
+				Methods:    map[string]string{"build": "Read BACKLOG.md, pick item, build it"},
+				Pipeline: &PipelineDef{
+					Steps: []PipelineStep{
+						{Label: "build", Kind: StepKindLoop, LoopMethod: "build"},
+					},
+				},
+			},
+		},
+	})
+	readEnvelope(t, scanner1) // consume apply response
+	conn1.Close()
+
+	// Subscribe as steer client
+	steerConn, steerScanner := dial(t, srv.Addr())
+	defer steerConn.Close()
+	sendEnvelope(t, steerConn, MsgSteerSubscribe, SteerSubscribeRequest{})
+
+	env := readEnvelope(t, steerScanner)
+	if env.Type != MsgSteerState {
+		t.Fatalf("expected steer_state, got %s", env.Type)
+	}
+
+	var state SteerStatePayload
+	if err := env.DecodePayload(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+
+	// Verify methods are included
+	if state.Methods == nil {
+		t.Fatal("expected Methods in steer state, got nil")
+	}
+	if body, ok := state.Methods["planner"]["build"]; !ok || !strings.Contains(body, "BACKLOG") {
+		t.Fatalf("expected method body with BACKLOG, got %q", body)
+	}
+
+	// Verify pipelines are included
+	if state.Pipelines == nil {
+		t.Fatal("expected Pipelines in steer state, got nil")
+	}
+	pdef, ok := state.Pipelines["planner"]
+	if !ok {
+		t.Fatal("expected pipeline for 'planner'")
+	}
+	if len(pdef.Steps) != 1 || pdef.Steps[0].LoopMethod != "build" {
+		t.Fatalf("expected 1 step with loop method 'build', got %+v", pdef)
+	}
+}
+
 // TestServerMultipleSteerClients verifies that multiple steer clients
 // all receive state push updates.
 func TestServerMultipleSteerClients(t *testing.T) {
