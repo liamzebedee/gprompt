@@ -444,8 +444,11 @@ func TestExportWithItems(t *testing.T) {
 		t.Fatalf("expected 3 rows, got %d", len(records))
 	}
 
-	// Check header
-	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "created_at", "updated_at"}
+	// Check header (includes tags column)
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	if len(records[0]) != len(expectedHeader) {
+		t.Fatalf("expected %d columns, got %d: %v", len(expectedHeader), len(records[0]), records[0])
+	}
 	for i, col := range expectedHeader {
 		if records[0][i] != col {
 			t.Errorf("header[%d]: expected %q, got %q", i, col, records[0][i])
@@ -601,6 +604,41 @@ func TestExportWithPriority(t *testing.T) {
 	}
 }
 
+func TestExportIncludesTags(t *testing.T) {
+	s := tempStore(t)
+
+	item, _ := s.Add("Tagged task")
+	_ = s.AddTag(item.ID, "work")
+	_ = s.AddTag(item.ID, "urgent")
+	_, _ = s.Add("Untagged task")
+
+	var buf bytes.Buffer
+	if err := s.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	r := csv.NewReader(&buf)
+	records, err := r.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(records) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(records))
+	}
+
+	// tags is column index 5
+	if records[0][5] != "tags" {
+		t.Errorf("expected header column 5 to be 'tags', got %q", records[0][5])
+	}
+	if records[1][5] != "work;urgent" {
+		t.Errorf("expected tags 'work;urgent', got %q", records[1][5])
+	}
+	if records[2][5] != "" {
+		t.Errorf("expected empty tags, got %q", records[2][5])
+	}
+}
+
 func TestExportIncludesDueDate(t *testing.T) {
 	s := tempStore(t)
 
@@ -627,8 +665,8 @@ func TestExportIncludesDueDate(t *testing.T) {
 		t.Fatalf("expected 3 rows, got %d", len(records))
 	}
 
-	// Check header includes due_date column
-	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "created_at", "updated_at"}
+	// Check header includes due_date and tags columns
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
 	if len(records[0]) != len(expectedHeader) {
 		t.Fatalf("expected %d columns, got %d: %v", len(expectedHeader), len(records[0]), records[0])
 	}
@@ -638,7 +676,7 @@ func TestExportIncludesDueDate(t *testing.T) {
 		}
 	}
 
-	// Check first data row has due date
+	// Check first data row has due date (column index 4)
 	if records[1][4] != "2025-06-15" {
 		t.Errorf("expected due_date '2025-06-15', got %q", records[1][4])
 	}

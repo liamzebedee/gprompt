@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `Export` CSV tests (`TestExportWithItems`, `TestExportIncludesDueDate`) use stale 7-column expected header missing "tags" — tests fail because `Export` now writes 8 columns including tags
+
 - [x] `ClearDone` produces nil `Items` slice when all items are removed — causes `Save` to write `"items": null`, which fails on subsequent `Load`
 
 - [x] `Search` accepts empty or whitespace-only query — returns all items instead of rejecting with error
