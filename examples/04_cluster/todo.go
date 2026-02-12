@@ -407,13 +407,13 @@ func ValidStatus(s Status) bool {
 }
 
 // Export writes all items as CSV to the given writer.
-// Columns: id, title, status, created_at, updated_at.
+// Columns: id, title, status, priority, due_date, tags, note, created_at, updated_at.
 func (s *Store) Export(w io.Writer) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
 
 	// Header row
-	if err := cw.Write([]string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}); err != nil {
+	if err := cw.Write([]string{"id", "title", "status", "priority", "due_date", "tags", "note", "created_at", "updated_at"}); err != nil {
 		return err
 	}
 
@@ -426,6 +426,7 @@ func (s *Store) Export(w io.Writer) error {
 			string(item.Priority),
 			item.DueDate.String(),
 			tagsStr,
+			item.Note,
 			item.CreatedAt.Format(time.RFC3339),
 			item.UpdatedAt.Format(time.RFC3339),
 		}
@@ -701,7 +702,7 @@ func (s *Store) ListByTag(tag string) ([]Item, error) {
 
 // Import reads items from a CSV reader and adds them to the store.
 // The CSV must have a header row matching the export format:
-// id, title, status, priority, due_date, tags, created_at, updated_at.
+// id, title, status, priority, due_date, tags, note, created_at, updated_at.
 // Imported items receive new IDs; the original IDs are ignored.
 // Returns the number of items imported and any error encountered.
 func (s *Store) Import(r io.Reader) (int, error) {
@@ -715,7 +716,7 @@ func (s *Store) Import(r io.Reader) (int, error) {
 		}
 		return 0, fmt.Errorf("reading CSV header: %w", err)
 	}
-	expected := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	expected := []string{"id", "title", "status", "priority", "due_date", "tags", "note", "created_at", "updated_at"}
 	if len(header) != len(expected) {
 		return 0, fmt.Errorf("CSV header has %d columns, expected %d", len(header), len(expected))
 	}
@@ -764,16 +765,18 @@ func (s *Store) Import(r io.Reader) (int, error) {
 			tags = strings.Split(tagsStr, ";")
 		}
 
+		note := record[6]
+
 		// Parse timestamps from CSV; fall back to now if missing or invalid.
 		now := time.Now()
 		createdAt := now
-		if ts := strings.TrimSpace(record[6]); ts != "" {
+		if ts := strings.TrimSpace(record[7]); ts != "" {
 			if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
 				createdAt = parsed
 			}
 		}
 		updatedAt := now
-		if ts := strings.TrimSpace(record[7]); ts != "" {
+		if ts := strings.TrimSpace(record[8]); ts != "" {
 			if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
 				updatedAt = parsed
 			}
@@ -786,6 +789,7 @@ func (s *Store) Import(r io.Reader) (int, error) {
 			Priority:  priority,
 			DueDate:   due,
 			Tags:      normaliseTags(tags),
+			Note:      note,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 		}
@@ -871,6 +875,31 @@ func (s *Store) Archive() (int, error) {
 
 	s.Items = kept
 	return len(archived), nil
+}
+
+// Swap exchanges the positions of two items identified by their IDs.
+// Both IDs must exist and be different.
+func (s *Store) Swap(id1, id2 int) error {
+	if id1 == id2 {
+		return fmt.Errorf("cannot swap an item with itself")
+	}
+	idx1, idx2 := -1, -1
+	for i := range s.Items {
+		if s.Items[i].ID == id1 {
+			idx1 = i
+		}
+		if s.Items[i].ID == id2 {
+			idx2 = i
+		}
+	}
+	if idx1 == -1 {
+		return fmt.Errorf("todo #%d not found", id1)
+	}
+	if idx2 == -1 {
+		return fmt.Errorf("todo #%d not found", id2)
+	}
+	s.Items[idx1], s.Items[idx2] = s.Items[idx2], s.Items[idx1]
+	return nil
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.

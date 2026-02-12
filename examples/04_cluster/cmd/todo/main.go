@@ -40,6 +40,7 @@ Commands:
   overdue             List items that are past their due date
   upcoming [days]     List items due today or within N days (default: 7)
   sort <field>        Sort items by: priority, due, status, created
+  swap <id1> <id2>    Swap the position of two items in the list
   archive             Move completed items to an archive file
   clear               Remove all completed items
   undo                Revert the last change
@@ -548,6 +549,35 @@ func main() {
 		if len(items) > 0 {
 			printItems(items, color)
 		}
+
+	case "swap":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo swap <id1> <id2>")
+			os.Exit(1)
+		}
+		id1, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		id2, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[3])
+			os.Exit(1)
+		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Swap(id1, id2); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Swapped #%d and #%d.\n", id1, id2)
 
 	case "archive":
 		if err := store.Snapshot(); err != nil {

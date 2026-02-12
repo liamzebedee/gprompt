@@ -447,7 +447,7 @@ func TestExportWithItems(t *testing.T) {
 	}
 
 	// Check header (includes tags column)
-	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "note", "created_at", "updated_at"}
 	if len(records[0]) != len(expectedHeader) {
 		t.Fatalf("expected %d columns, got %d: %v", len(expectedHeader), len(records[0]), records[0])
 	}
@@ -668,7 +668,7 @@ func TestExportIncludesDueDate(t *testing.T) {
 	}
 
 	// Check header includes due_date and tags columns
-	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "note", "created_at", "updated_at"}
 	if len(records[0]) != len(expectedHeader) {
 		t.Fatalf("expected %d columns, got %d: %v", len(expectedHeader), len(records[0]), records[0])
 	}
@@ -1782,7 +1782,7 @@ func TestExportIncludesTagsFromAddFullWithTags(t *testing.T) {
 	}
 
 	// Check header includes tags
-	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "created_at", "updated_at"}
+	expectedHeader := []string{"id", "title", "status", "priority", "due_date", "tags", "note", "created_at", "updated_at"}
 	for i, col := range expectedHeader {
 		if records[0][i] != col {
 			t.Errorf("header[%d]: expected %q, got %q", i, col, records[0][i])
@@ -1833,10 +1833,10 @@ func TestValidTag(t *testing.T) {
 func TestImportBasic(t *testing.T) {
 	s := tempStore(t)
 
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-1,Buy milk,pending,high,2025-03-01,grocery;home,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
-2,Write report,in_progress,medium,,work,2025-01-02T00:00:00Z,2025-01-02T00:00:00Z
-3,Relax,done,,,,,
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+1,Buy milk,pending,high,2025-03-01,grocery;home,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+2,Write report,in_progress,medium,,work,,2025-01-02T00:00:00Z,2025-01-02T00:00:00Z
+3,Relax,done,,,,,,
 `
 	count, err := s.Import(strings.NewReader(csvData))
 	if err != nil {
@@ -1879,8 +1879,8 @@ func TestImportAssignsNewIDs(t *testing.T) {
 	// Pre-populate the store with one item.
 	s.Add("Existing item")
 
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-99,Imported item,pending,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+99,Imported item,pending,,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
 `
 	count, err := s.Import(strings.NewReader(csvData))
 	if err != nil {
@@ -1913,8 +1913,8 @@ func TestImportBadHeader(t *testing.T) {
 
 func TestImportInvalidStatus(t *testing.T) {
 	s := tempStore(t)
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-1,Bad status,invalid_status,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+1,Bad status,invalid_status,,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
 `
 	_, err := s.Import(strings.NewReader(csvData))
 	if err == nil {
@@ -1924,8 +1924,8 @@ func TestImportInvalidStatus(t *testing.T) {
 
 func TestImportInvalidPriority(t *testing.T) {
 	s := tempStore(t)
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-1,Bad priority,pending,ultra,,,,
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+1,Bad priority,pending,ultra,,,,,
 `
 	_, err := s.Import(strings.NewReader(csvData))
 	if err == nil {
@@ -1935,8 +1935,8 @@ func TestImportInvalidPriority(t *testing.T) {
 
 func TestImportEmptyTitle(t *testing.T) {
 	s := tempStore(t)
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-1,,pending,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+1,,pending,,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
 `
 	_, err := s.Import(strings.NewReader(csvData))
 	if err == nil {
@@ -2032,8 +2032,8 @@ func TestExportImportRoundTripPreservesTags(t *testing.T) {
 func TestImportPreservesTimestamps(t *testing.T) {
 	s := tempStore(t)
 
-	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
-1,Old task,pending,,,work,2023-06-15T10:30:00Z,2023-07-20T14:45:00Z
+	csvData := `id,title,status,priority,due_date,tags,note,created_at,updated_at
+1,Old task,pending,,,work,,2023-06-15T10:30:00Z,2023-07-20T14:45:00Z
 `
 	count, err := s.Import(strings.NewReader(csvData))
 	if err != nil {
@@ -2496,6 +2496,175 @@ func TestRenameTagCaseInsensitive(t *testing.T) {
 	item, _ := s.Get(1)
 	if !item.HasTag("office") {
 		t.Errorf("expected office tag, got %v", item.Tags)
+	}
+}
+
+// --- ListWithTag tests ---
+
+func TestListWithTagRejectsEmptyTag(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work"})
+
+	_, err := s.ListWithTag("", "")
+	if err == nil {
+		t.Fatal("expected error for empty tag filter, got nil")
+	}
+
+	_, err = s.ListWithTag("", "   ")
+	if err == nil {
+		t.Fatal("expected error for whitespace-only tag filter, got nil")
+	}
+}
+
+func TestListWithTagFiltersCorrectly(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Work task", PriorityNone, DueDate{}, []string{"work"})
+	_, _ = s.AddFullWithTags("Personal task", PriorityNone, DueDate{}, []string{"personal"})
+	item3, _ := s.AddFullWithTags("Done work", PriorityNone, DueDate{}, []string{"work"})
+	_ = s.SetStatus(item3.ID, StatusDone)
+
+	// All statuses + tag filter
+	items, err := s.ListWithTag("", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items with tag 'work', got %d", len(items))
+	}
+
+	// Status + tag filter combined
+	items, err = s.ListWithTag(StatusPending, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 pending item with tag 'work', got %d", len(items))
+	}
+	if items[0].Title != "Work task" {
+		t.Errorf("expected 'Work task', got %q", items[0].Title)
+	}
+}
+
+func TestListWithTagRejectsInvalidStatus(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"work"})
+
+	_, err := s.ListWithTag(Status("bogus"), "work")
+	if err == nil {
+		t.Fatal("expected error for invalid status filter, got nil")
+	}
+}
+
+func TestListWithTagNoMatches(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("Untagged task")
+
+	items, err := s.ListWithTag("", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(items))
+	}
+}
+
+// --- Export/Import note round-trip tests ---
+
+func TestExportImportRoundTripPreservesNotes(t *testing.T) {
+	s1 := tempStore(t)
+	item, _ := s1.Add("Task with note")
+	s1.SetNote(item.ID, "Important details here")
+	_, _ = s1.Add("Task without note")
+
+	var buf bytes.Buffer
+	if err := s1.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := tempStore(t)
+	count, err := s2.Import(strings.NewReader(buf.String()))
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 imported, got %d", count)
+	}
+
+	// Note should be preserved after round-trip.
+	if s2.Items[0].Note != "Important details here" {
+		t.Errorf("expected note 'Important details here', got %q", s2.Items[0].Note)
+	}
+	if s2.Items[1].Note != "" {
+		t.Errorf("expected empty note, got %q", s2.Items[1].Note)
+	}
+}
+
+func TestExportIncludesNoteColumn(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	s.SetNote(item.ID, "my note")
+
+	var buf bytes.Buffer
+	if err := s.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	r := csv.NewReader(&buf)
+	records, err := r.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Header should include "note" column
+	found := false
+	for _, col := range records[0] {
+		if col == "note" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'note' column in CSV header, got: %v", records[0])
+	}
+}
+
+func TestSwap(t *testing.T) {
+	s := tempStore(t)
+	a, _ := s.Add("First")
+	b, _ := s.Add("Second")
+	c, _ := s.Add("Third")
+
+	if err := s.Swap(a.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	// After swapping first and third, order should be Third, Second, First.
+	if s.Items[0].ID != c.ID {
+		t.Errorf("expected item at index 0 to be #%d, got #%d", c.ID, s.Items[0].ID)
+	}
+	if s.Items[1].ID != b.ID {
+		t.Errorf("expected item at index 1 to be #%d, got #%d", b.ID, s.Items[1].ID)
+	}
+	if s.Items[2].ID != a.ID {
+		t.Errorf("expected item at index 2 to be #%d, got #%d", a.ID, s.Items[2].ID)
+	}
+}
+
+func TestSwapSameID(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Only")
+	if err := s.Swap(item.ID, item.ID); err == nil {
+		t.Fatal("expected error when swapping item with itself")
+	}
+}
+
+func TestSwapNotFound(t *testing.T) {
+	s := tempStore(t)
+	a, _ := s.Add("Task")
+	if err := s.Swap(a.ID, 999); err == nil {
+		t.Fatal("expected error for non-existent ID")
+	}
+	if err := s.Swap(999, a.ID); err == nil {
+		t.Fatal("expected error for non-existent ID")
 	}
 }
 

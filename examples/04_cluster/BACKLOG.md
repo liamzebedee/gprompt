@@ -4,6 +4,8 @@
 
 ## Completed
 
+- [x] Add `todo swap <id1> <id2>` command to swap the position of two items in the list (for manual reordering)
+
 - [x] Add `todo note <id> <text>` command to set a free-text note on an item (displayed in `show`, clearable with `todo note <id> --clear`)
 
 - [x] Add `todo rename-tag <old> <new>` command to rename a tag across all items (case-insensitive, deduplicates)
