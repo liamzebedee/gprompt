@@ -144,6 +144,59 @@ func TestEditNotFound(t *testing.T) {
 	}
 }
 
+func TestSearchFindsMatches(t *testing.T) {
+	s := tempStore(t)
+
+	s.Add("Buy groceries")
+	s.Add("Buy a new book")
+	s.Add("Write tests")
+
+	results := s.Search("buy")
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, item := range results {
+		if item.Title != "Buy groceries" && item.Title != "Buy a new book" {
+			t.Errorf("unexpected item in results: %q", item.Title)
+		}
+	}
+}
+
+func TestSearchCaseInsensitive(t *testing.T) {
+	s := tempStore(t)
+
+	s.Add("Deploy To Production")
+
+	results := s.Search("deploy to production")
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Title != "Deploy To Production" {
+		t.Errorf("expected 'Deploy To Production', got %q", results[0].Title)
+	}
+}
+
+func TestSearchNoMatches(t *testing.T) {
+	s := tempStore(t)
+
+	s.Add("Write docs")
+	s.Add("Fix bug")
+
+	results := s.Search("deploy")
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchEmptyStore(t *testing.T) {
+	s := tempStore(t)
+
+	results := s.Search("anything")
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for empty store, got %d", len(results))
+	}
+}
+
 func TestParseAddTitle(t *testing.T) {
 	tests := []struct {
 		name string

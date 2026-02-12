@@ -19,6 +19,7 @@ Commands:
   start <id>          Mark an item as in progress
   delete <id>         Delete an item
   edit <id> <title>   Rename an item
+  search <query>      Search items by title substring
   stats               Show counts by status
   help                Show this message
 `)
@@ -125,6 +126,24 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Renamed #%d to %q.\n", id, newTitle)
+
+	case "search":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: todo search <query>")
+			os.Exit(1)
+		}
+		query := todo.ParseAddTitle(os.Args[2:])
+		items := store.Search(query)
+		if len(items) == 0 {
+			fmt.Printf("No items matching %q.\n", query)
+			return
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tSTATUS\tTITLE")
+		for _, item := range items {
+			fmt.Fprintf(w, "%d\t%s\t%s\n", item.ID, item.Status, item.Title)
+		}
+		w.Flush()
 
 	case "stats":
 		stats := store.Stats()
