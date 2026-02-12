@@ -1361,6 +1361,45 @@ func TestUndoRestoresClearedItems(t *testing.T) {
 	}
 }
 
+func TestClearDoneAllPersistence(t *testing.T) {
+	f, err := os.CreateTemp("", "todo-clear-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	s1 := NewStore(f.Name())
+	s1.Load()
+	item1, _ := s1.Add("Task A")
+	item2, _ := s1.Add("Task B")
+	_ = s1.SetStatus(item1.ID, StatusDone)
+	_ = s1.SetStatus(item2.ID, StatusDone)
+
+	removed := s1.ClearDone()
+	if removed != 2 {
+		t.Fatalf("expected 2 removed, got %d", removed)
+	}
+	if err := s1.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload — should succeed and have 0 items, not fail to parse.
+	s2 := NewStore(f.Name())
+	if err := s2.Load(); err != nil {
+		t.Fatalf("failed to load after ClearDone removed all items: %v", err)
+	}
+	if len(s2.Items) != 0 {
+		t.Errorf("expected 0 items after reload, got %d", len(s2.Items))
+	}
+
+	// NextID should be preserved so new items don't reuse old IDs.
+	newItem, _ := s2.Add("Task C")
+	if newItem.ID <= item2.ID {
+		t.Errorf("expected new ID > %d, got %d", item2.ID, newItem.ID)
+	}
+}
+
 func TestUndoPersistsToDisk(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })

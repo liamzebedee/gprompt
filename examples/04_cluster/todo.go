@@ -99,8 +99,20 @@ type Item struct {
 	Status    Status    `json:"status"`
 	Priority  Priority  `json:"priority,omitempty"`
 	DueDate   DueDate   `json:"due_date,omitempty"`
+	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// HasTag reports whether the item has the given tag (case-insensitive).
+func (it *Item) HasTag(tag string) bool {
+	lower := strings.ToLower(tag)
+	for _, t := range it.Tags {
+		if strings.ToLower(t) == lower {
+			return true
+		}
+	}
+	return false
 }
 
 type Store struct {
@@ -230,6 +242,11 @@ func (s *Store) AddWithPriority(title string, priority Priority) (Item, error) {
 
 // AddFull creates a new item with the given title, priority, and optional due date.
 func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, error) {
+	return s.AddFullWithTags(title, priority, due, nil)
+}
+
+// AddFullWithTags creates a new item with the given title, priority, due date, and tags.
+func (s *Store) AddFullWithTags(title string, priority Priority, due DueDate, tags []string) (Item, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return Item{}, fmt.Errorf("title must not be empty")
@@ -237,6 +254,8 @@ func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, err
 	if !ValidPriority(priority) {
 		return Item{}, fmt.Errorf("invalid priority: %q (valid values: low, medium, high, or empty to clear)", priority)
 	}
+	// Validate and normalise tags.
+	cleaned := normaliseTags(tags)
 	now := time.Now()
 	item := Item{
 		ID:        s.nextID(),
@@ -244,6 +263,7 @@ func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, err
 		Status:    StatusPending,
 		Priority:  priority,
 		DueDate:   due,
+		Tags:      cleaned,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -399,7 +419,7 @@ func (s *Store) Export(w io.Writer) error {
 
 // ClearDone removes all items with StatusDone and returns the number removed.
 func (s *Store) ClearDone() int {
-	var kept []Item
+	kept := make([]Item, 0, len(s.Items))
 	removed := 0
 	for _, item := range s.Items {
 		if item.Status == StatusDone {
@@ -502,4 +522,90 @@ func (s *Store) List(filter Status) ([]Item, error) {
 		}
 	}
 	return result, nil
+}
+
+// normaliseTags trims, lowercases, and deduplicates tags, dropping empty values.
+func normaliseTags(tags []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range tags {
+		t = strings.TrimSpace(strings.ToLower(t))
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// ValidTag reports whether tag is a non-empty, trimmed string.
+func ValidTag(tag string) bool {
+	return strings.TrimSpace(tag) != ""
+}
+
+// AddTag adds a tag to an existing item. Duplicate tags are ignored (case-insensitive).
+func (s *Store) AddTag(id int, tag string) error {
+	tag = strings.TrimSpace(strings.ToLower(tag))
+	if tag == "" {
+		return fmt.Errorf("tag must not be empty")
+	}
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	if item.HasTag(tag) {
+		return nil // already tagged
+	}
+	item.Tags = append(item.Tags, tag)
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
+// RemoveTag removes a tag from an existing item. Returns an error if the tag is not present.
+func (s *Store) RemoveTag(id int, tag string) error {
+	tag = strings.TrimSpace(strings.ToLower(tag))
+	if tag == "" {
+		return fmt.Errorf("tag must not be empty")
+	}
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i, t := range item.Tags {
+		if strings.ToLower(t) == tag {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("tag %q not found on #%d", tag, id)
+	}
+	item.Tags = append(item.Tags[:idx], item.Tags[idx+1:]...)
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
+// ListByTag returns items that have the given tag (case-insensitive).
+func (s *Store) ListByTag(tag string) ([]Item, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, fmt.Errorf("tag filter must not be empty")
+	}
+	var result []Item
+	for _, item := range s.Items {
+		if item.HasTag(tag) {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+// FormatTags returns a comma-separated string of tags, or "-" if empty.
+func FormatTags(tags []string) string {
+	if len(tags) == 0 {
+		return "-"
+	}
+	return strings.Join(tags, ", ")
 }

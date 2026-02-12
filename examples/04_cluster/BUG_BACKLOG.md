@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `ClearDone` produces nil `Items` slice when all items are removed — causes `Save` to write `"items": null`, which fails on subsequent `Load`
+
 - [x] `Search` accepts empty or whitespace-only query — returns all items instead of rejecting with error
 
 - [x] `Add` and `Edit` do not trim leading/trailing whitespace from titles — stored as-is with accidental spaces
