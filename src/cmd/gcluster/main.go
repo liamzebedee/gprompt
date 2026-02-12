@@ -13,9 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"p2p/cluster"
+	"p2p/cluster/tui"
 	"p2p/parser"
 	"p2p/pipeline"
 	"p2p/registry"
@@ -310,9 +309,7 @@ func cmdSteer(args []string) {
 	defer client.Close()
 
 	// Run TUI
-	model := cluster.NewTUIModel(client)
-	p := tea.NewProgram(model, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	if err := tui.RunTUI(client); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
 	}
