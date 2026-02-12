@@ -42,6 +42,7 @@ type errMsg struct{ err error }
 func (e errMsg) Error() string { return e.err.Error() }
 
 type reconnectMsg struct{}
+type tickMsg struct{}
 
 const (
 	focusSidebar = "sidebar"
@@ -74,10 +75,11 @@ type Model struct {
 	PromptInput component.TextInput
 
 	// Focus + status
-	Focused string
-	ErrText string
-	Ready   bool
-	Started bool
+	Focused   string
+	ErrText   string
+	Ready     bool
+	Started   bool
+	SpinFrame int
 }
 
 // NewModel creates the initial TUI model.

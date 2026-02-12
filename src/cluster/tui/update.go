@@ -36,6 +36,10 @@ func tuiUpdate(m interface{}, msg app.Msg) app.UpdateResult {
 		mdl.ErrText = ""
 		return app.NoCmd(mdl)
 
+	case tickMsg:
+		mdl.SpinFrame++
+		return app.NoCmd(mdl)
+
 	case app.KeyMsg:
 		return handleKey(mdl, msg)
 	}
@@ -43,8 +47,9 @@ func tuiUpdate(m interface{}, msg app.Msg) app.UpdateResult {
 	if !mdl.Started {
 		mdl.Started = true
 		result := app.UpdateResult{Model: mdl, Cmds: []app.Cmd{disableMouseCmd}}
+		result.Subs = []app.Sub{tickSub()}
 		if mdl.Client != nil {
-			result.Subs = []app.Sub{stateSub(mdl.Client), errSub(mdl.Client), reconnectSub(mdl.Client)}
+			result.Subs = append(result.Subs, stateSub(mdl.Client), errSub(mdl.Client), reconnectSub(mdl.Client))
 		}
 		return result
 	}

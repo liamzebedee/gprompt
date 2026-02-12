@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"p2p/cluster"
 
@@ -239,7 +238,8 @@ func buildIterContent(entry Entry, mdl *Model) []node.Node {
 	}
 
 	var iter *cluster.IterationResult
-	if run.LiveIter != nil && run.LiveIter.Iteration == entry.Iter {
+	live := run.LiveIter != nil && run.LiveIter.Iteration == entry.Iter
+	if live {
 		iter = run.LiveIter
 	} else {
 		for i := range run.Iterations {
@@ -253,34 +253,50 @@ func buildIterContent(entry Entry, mdl *Model) []node.Node {
 		return append(items, node.Text("  Iteration not found."))
 	}
 
-	if iter.FinishedAt.IsZero() {
-		items = append(items, node.TextStyled(
-			fmt.Sprintf("  Started: %s (running...)", iter.StartedAt.Format("15:04:05")), 8, 0, 0))
-	} else {
-		items = append(items, node.TextStyled(
-			fmt.Sprintf("  Duration: %s", iter.FinishedAt.Sub(iter.StartedAt).Truncate(time.Millisecond)), 8, 0, 0))
-	}
-	items = append(items, node.Text(""))
-
 	if iter.Error != "" {
 		items = append(items, node.TextStyled("  Error: "+iter.Error, 1, 0, node.Bold), node.Text(""))
+	}
+
+	// Assemble consecutive text fragments into blocks, separated by tool events.
+	// Renders like Claude Code: ● text block, ● Tool(name), ⎿  result
+	var textBuf strings.Builder
+	flush := func() {
+		if textBuf.Len() == 0 {
+			return
+		}
+		for _, line := range strings.Split(strings.TrimRight(textBuf.String(), "\n"), "\n") {
+			items = append(items, node.Text("  "+line))
+		}
+		items = append(items, node.Text(""))
+		textBuf.Reset()
 	}
 
 	for _, msg := range iter.Messages {
 		switch msg.Type {
 		case "text":
-			for _, line := range strings.Split(msg.Content, "\n") {
-				items = append(items, node.Text("  "+line))
-			}
+			textBuf.WriteString(msg.Content)
 		case "tool_use":
-			items = append(items, node.TextStyled(fmt.Sprintf("  [Tool: %s]", msg.Content), 33, 0, node.Bold))
+			flush()
+			items = append(items,
+				node.TextStyled(fmt.Sprintf("  ● %s", msg.Content), 33, 0, node.Bold))
 		case "tool_result":
 			c := msg.Content
 			if len(c) > 200 {
 				c = c[:200] + "…"
 			}
-			items = append(items, node.TextStyled("  "+c, 8, 0, 0))
+			items = append(items,
+				node.TextStyled("    ⎿  "+c, 8, 0, 0),
+				node.Text(""))
 		}
 	}
+	flush()
+
+	// Animated progress indicator while iteration is still running
+	if live && iter.FinishedAt.IsZero() {
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		f := frames[mdl.SpinFrame%len(frames)]
+		items = append(items, node.TextStyled("  "+f+" Thinking...", 8, 0, 0))
+	}
+
 	return items
 }

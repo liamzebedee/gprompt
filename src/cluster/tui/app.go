@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"p2p/cluster"
 
@@ -61,6 +62,15 @@ func reconnectSub(client *cluster.SteerClient) app.Sub {
 				return nil
 			}
 			send(reconnectMsg{})
+		}
+	}
+}
+
+func tickSub() app.Sub {
+	return func(send func(app.Msg)) app.Msg {
+		for {
+			time.Sleep(300 * time.Millisecond)
+			send(tickMsg{})
 		}
 	}
 }
