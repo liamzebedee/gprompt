@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	todo "github.com/example/todo"
@@ -16,9 +17,10 @@ Global flags:
   --file <path>       Use a specific todo file (default: %s)
 
 Commands:
-  add [--priority low|medium|high] [--due YYYY-MM-DD] <title>
+  add [--priority low|medium|high] [--due YYYY-MM-DD] [--tag TAG]... <title>
                       Add a new todo item
-  list [status]       List items (optional filter: pending|in_progress|done)
+  list [--tag TAG] [status]
+                      List items (optional filter: pending|in_progress|done)
   done <id>           Mark an item as done
   start <id>          Mark an item as in progress
   delete <id>         Delete an item
@@ -27,12 +29,15 @@ Commands:
                       Set or clear an item's priority
   due <id> <YYYY-MM-DD|none>
                       Set or clear an item's due date
+  tag <id> <tag>      Add a tag to an item
+  untag <id> <tag>    Remove a tag from an item
   search <query>      Search items by title substring
   stats               Show counts by status
   sort <field>        Sort items by: priority, due, status, created
   clear               Remove all completed items
   undo                Revert the last change
   export              Output all items as CSV
+  import <file.csv>   Import items from a CSV file
   help                Show this message
 `, todo.DefaultFile)
 	os.Exit(1)
@@ -68,12 +73,13 @@ func main() {
 	switch cmd {
 	case "add":
 		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] <title>")
+			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] [--tag TAG]... <title>")
 			os.Exit(1)
 		}
 		args := os.Args[2:]
 		var priority todo.Priority
 		var due todo.DueDate
+		var tags []string
 		// Parse optional flags in any order before the title.
 		for len(args) >= 2 {
 			if args[0] == "--priority" {
@@ -91,12 +97,19 @@ func main() {
 					os.Exit(1)
 				}
 				args = args[2:]
+			} else if args[0] == "--tag" {
+				if !todo.ValidTag(args[1]) {
+					fmt.Fprintf(os.Stderr, "Invalid tag: %q (must not be empty)\n", args[1])
+					os.Exit(1)
+				}
+				tags = append(tags, args[1])
+				args = args[2:]
 			} else {
 				break
 			}
 		}
 		if len(args) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] <title>")
+			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] [--tag TAG]... <title>")
 			os.Exit(1)
 		}
 		title := todo.ParseAddTitle(args)
@@ -104,7 +117,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
 			os.Exit(1)
 		}
-		item, err := store.AddFull(title, priority, due)
+		item, err := store.AddFullWithTags(title, priority, due, tags)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -120,17 +133,37 @@ func main() {
 		if item.DueDate.Valid {
 			suffix += fmt.Sprintf(" (due %s)", item.DueDate)
 		}
+		if len(item.Tags) > 0 {
+			suffix += fmt.Sprintf(" {%s}", strings.Join(item.Tags, ", "))
+		}
 		fmt.Printf("Added #%d: %s%s\n", item.ID, item.Title, suffix)
 
 	case "list":
+		args := os.Args[2:]
+		var tagFilter string
+		// Parse optional --tag flag before the status filter.
+		if len(args) >= 2 && args[0] == "--tag" {
+			tagFilter = args[1]
+			args = args[2:]
+		}
 		var filter todo.Status
-		if len(os.Args) >= 3 {
-			filter = todo.Status(os.Args[2])
+		if len(args) >= 1 {
+			filter = todo.Status(args[0])
 		}
 		items, err := store.List(filter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
+		}
+		// Apply tag filter if specified.
+		if tagFilter != "" {
+			var filtered []todo.Item
+			for _, item := range items {
+				if item.HasTag(tagFilter) {
+					filtered = append(filtered, item)
+				}
+			}
+			items = filtered
 		}
 		if len(items) == 0 {
 			fmt.Println("No items.")
@@ -249,6 +282,56 @@ func main() {
 		} else {
 			fmt.Printf("Set #%d priority to %s.\n", id, pri)
 		}
+
+	case "tag":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo tag <id> <tag>")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		tag := os.Args[3]
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.AddTag(id, tag); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Added tag %q to #%d.\n", strings.ToLower(strings.TrimSpace(tag)), id)
+
+	case "untag":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo untag <id> <tag>")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		tag := os.Args[3]
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.RemoveTag(id, tag); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Removed tag %q from #%d.\n", strings.ToLower(strings.TrimSpace(tag)), id)
 
 	case "search":
 		if len(os.Args) < 3 {
@@ -374,6 +457,33 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "import":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: todo import <file.csv>")
+			os.Exit(1)
+		}
+		csvPath := os.Args[2]
+		f, err := os.Open(csvPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", csvPath, err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		count, err := store.Import(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error importing: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Imported %d item(s) from %s.\n", count, csvPath)
+
 	case "help":
 		usage()
 
@@ -385,17 +495,18 @@ func main() {
 
 func printItems(items []todo.Item, color bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, todo.ColorLabel("ID\tSTATUS\tPRIORITY\tDUE\tTITLE", color))
+	fmt.Fprintln(w, todo.ColorLabel("ID\tSTATUS\tPRIORITY\tDUE\tTAGS\tTITLE", color))
 	for _, item := range items {
 		dueStr := "-"
 		if item.DueDate.Valid {
 			dueStr = todo.ColorDueDate(item.DueDate, color)
 		}
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
 			item.ID,
 			todo.ColorStatus(item.Status, color),
 			todo.ColorPriority(item.Priority, color),
 			dueStr,
+			todo.FormatTags(item.Tags),
 			item.Title,
 		)
 	}

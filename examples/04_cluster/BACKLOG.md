@@ -6,6 +6,8 @@
 
 ## Completed
 
+- [x] Add `todo import <file.csv>` command to import items from CSV (round-trips with export)
+
 - [x] Add `todo undo` command to revert the last change (snapshot-based single-level undo)
 
 - [x] Add `todo sort <field>` command to reorder items by priority, due date, status, or creation date

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -1823,6 +1824,153 @@ func TestValidTag(t *testing.T) {
 	}
 	if !ValidTag("  work  ") {
 		t.Error("expected '  work  ' to be valid (trimmable)")
+	}
+}
+
+// --- Import tests ---
+
+func TestImportBasic(t *testing.T) {
+	s := tempStore(t)
+
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+1,Buy milk,pending,high,2025-03-01,grocery;home,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+2,Write report,in_progress,medium,,work,2025-01-02T00:00:00Z,2025-01-02T00:00:00Z
+3,Relax,done,,,,,
+`
+	count, err := s.Import(strings.NewReader(csvData))
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 imported, got %d", count)
+	}
+	if len(s.Items) != 3 {
+		t.Fatalf("expected 3 items in store, got %d", len(s.Items))
+	}
+
+	// Items get new IDs starting from 1.
+	if s.Items[0].ID != 1 || s.Items[0].Title != "Buy milk" {
+		t.Errorf("item 0: got ID=%d Title=%q", s.Items[0].ID, s.Items[0].Title)
+	}
+	if s.Items[0].Status != StatusPending {
+		t.Errorf("item 0: expected pending, got %s", s.Items[0].Status)
+	}
+	if s.Items[0].Priority != PriorityHigh {
+		t.Errorf("item 0: expected high, got %s", s.Items[0].Priority)
+	}
+	if !s.Items[0].DueDate.Valid || s.Items[0].DueDate.String() != "2025-03-01" {
+		t.Errorf("item 0: expected due 2025-03-01, got %s", s.Items[0].DueDate)
+	}
+	if len(s.Items[0].Tags) != 2 || s.Items[0].Tags[0] != "grocery" || s.Items[0].Tags[1] != "home" {
+		t.Errorf("item 0: expected tags [grocery home], got %v", s.Items[0].Tags)
+	}
+
+	if s.Items[1].Status != StatusInProgress {
+		t.Errorf("item 1: expected in_progress, got %s", s.Items[1].Status)
+	}
+	if s.Items[2].Status != StatusDone {
+		t.Errorf("item 2: expected done, got %s", s.Items[2].Status)
+	}
+}
+
+func TestImportAssignsNewIDs(t *testing.T) {
+	s := tempStore(t)
+	// Pre-populate the store with one item.
+	s.Add("Existing item")
+
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+99,Imported item,pending,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+`
+	count, err := s.Import(strings.NewReader(csvData))
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 imported, got %d", count)
+	}
+	// The imported item should get ID 2, not 99.
+	if s.Items[1].ID != 2 {
+		t.Errorf("expected imported item ID=2, got %d", s.Items[1].ID)
+	}
+}
+
+func TestImportEmptyCSV(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.Import(strings.NewReader(""))
+	if err == nil {
+		t.Fatal("expected error for empty CSV")
+	}
+}
+
+func TestImportBadHeader(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.Import(strings.NewReader("foo,bar\n"))
+	if err == nil {
+		t.Fatal("expected error for bad header")
+	}
+}
+
+func TestImportInvalidStatus(t *testing.T) {
+	s := tempStore(t)
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+1,Bad status,invalid_status,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+`
+	_, err := s.Import(strings.NewReader(csvData))
+	if err == nil {
+		t.Fatal("expected error for invalid status")
+	}
+}
+
+func TestImportInvalidPriority(t *testing.T) {
+	s := tempStore(t)
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+1,Bad priority,pending,ultra,,,,
+`
+	_, err := s.Import(strings.NewReader(csvData))
+	if err == nil {
+		t.Fatal("expected error for invalid priority")
+	}
+}
+
+func TestImportEmptyTitle(t *testing.T) {
+	s := tempStore(t)
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+1,,pending,,,,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+`
+	_, err := s.Import(strings.NewReader(csvData))
+	if err == nil {
+		t.Fatal("expected error for empty title")
+	}
+}
+
+func TestImportRoundTrip(t *testing.T) {
+	// Create a store, add items, export to CSV, import into a new store.
+	s1 := tempStore(t)
+	s1.AddFullWithTags("Task A", PriorityHigh, DueDate{}, []string{"work"})
+	s1.AddFullWithTags("Task B", PriorityLow, DueDate{}, nil)
+	s1.SetStatus(1, StatusDone)
+
+	var buf bytes.Buffer
+	if err := s1.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := tempStore(t)
+	count, err := s2.Import(&buf)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 imported, got %d", count)
+	}
+	if s2.Items[0].Title != "Task A" || s2.Items[0].Status != StatusDone || s2.Items[0].Priority != PriorityHigh {
+		t.Errorf("round-trip item 0 mismatch: %+v", s2.Items[0])
+	}
+	if len(s2.Items[0].Tags) != 1 || s2.Items[0].Tags[0] != "work" {
+		t.Errorf("round-trip item 0 tags mismatch: %v", s2.Items[0].Tags)
+	}
+	if s2.Items[1].Title != "Task B" || s2.Items[1].Priority != PriorityLow {
+		t.Errorf("round-trip item 1 mismatch: %+v", s2.Items[1])
 	}
 }
 
