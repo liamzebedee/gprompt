@@ -1,5 +1,5 @@
 all-shapes(idea):
-	idea -> map([hierarchical, conversational, first-principles, spiritually, tinkering, open-ssx])
+	idea -> map([hierarchical, conversational, first-principles, spiritually, tinkering, open-ssx], idea)
 
 hierarchical:
 	respond in a hierarchical, unfurling structure, whereby you try to summarise lower-level bits into one higher-level idea, and then proceed to explain those bits into the higher-level idea, and so on.
