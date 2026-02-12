@@ -4,6 +4,10 @@
 
 ## Resolved
 
+- [x] `Export`/`Import` CSV missing `note` column — export→import round-trip silently drops notes added via `SetNote`
+
+- [x] `list --tag` accepts empty or whitespace-only tag filter without validation — silently returns no items instead of rejecting with an error like `ListByTag` and other validated inputs
+
 - [x] `Upcoming` accepts negative `days` values without error — silently returns empty results instead of rejecting with an error like other validated inputs
 
 - [x] `List` with empty filter returns direct reference to internal `Items` slice — callers can mutate store state; filtered lists return safe copies
