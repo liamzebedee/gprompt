@@ -286,3 +286,84 @@ func TestExecutorIterationTracking(t *testing.T) {
 
 	exec.StopAll(2 * time.Second)
 }
+
+func TestExecutorSnapshot(t *testing.T) {
+	store := NewStore()
+	seedAgent(store, "builder")
+	seedAgent(store, "tester")
+
+	exec := NewExecutor(store, fakeClaude(5*time.Millisecond))
+
+	exec.Start("builder", map[string]string{"build": "do build"})
+	exec.Start("tester", map[string]string{"test": "do test"})
+
+	// Let them run a few iterations.
+	time.Sleep(40 * time.Millisecond)
+
+	snap := exec.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("expected 2 runs in snapshot, got %d", len(snap))
+	}
+
+	for _, name := range []string{"builder", "tester"} {
+		rs, ok := snap[name]
+		if !ok {
+			t.Fatalf("expected snapshot for %s", name)
+		}
+		if rs.Name != name {
+			t.Errorf("snapshot name: expected %q, got %q", name, rs.Name)
+		}
+		if len(rs.Iterations) == 0 {
+			t.Errorf("expected at least 1 iteration for %s", name)
+		}
+		if rs.StartedAt.IsZero() {
+			t.Errorf("expected non-zero StartedAt for %s", name)
+		}
+	}
+
+	exec.StopAll(2 * time.Second)
+}
+
+func TestExecutorSnapshotCapsIterations(t *testing.T) {
+	store := NewStore()
+	seedAgent(store, "runner")
+
+	// Very fast iterations to accumulate >10
+	exec := NewExecutor(store, fakeClaude(1*time.Millisecond))
+	exec.Start("runner", map[string]string{"work": "do work"})
+
+	// Wait for at least 12 iterations
+	time.Sleep(50 * time.Millisecond)
+
+	snap := exec.Snapshot()
+	rs := snap["runner"]
+	if len(rs.Iterations) > 10 {
+		t.Fatalf("expected snapshot capped at 10 iterations, got %d", len(rs.Iterations))
+	}
+
+	exec.StopAll(2 * time.Second)
+}
+
+func TestExecutorOnIteration(t *testing.T) {
+	store := NewStore()
+	seedAgent(store, "builder")
+
+	exec := NewExecutor(store, fakeClaude(5*time.Millisecond))
+
+	var callCount atomic.Int64
+	exec.OnIteration(func(agentName string) {
+		callCount.Add(1)
+	})
+
+	exec.Start("builder", map[string]string{"build": "do work"})
+
+	// Let it run a few iterations.
+	time.Sleep(40 * time.Millisecond)
+
+	exec.StopAll(2 * time.Second)
+
+	count := callCount.Load()
+	if count == 0 {
+		t.Fatal("expected OnIteration callback to be called at least once")
+	}
+}

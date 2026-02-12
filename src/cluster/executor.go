@@ -99,6 +99,17 @@ func (r *AgentRun) SnapshotIterations() []IterationResult {
 	return cp
 }
 
+// AgentRunSnapshot is a serializable snapshot of a running agent's iteration history.
+// It is included in SteerStatePayload for steer clients, NOT persisted to disk.
+// This keeps runtime/ephemeral iteration data separate from the declarative
+// ClusterObject model that gets persisted.
+type AgentRunSnapshot struct {
+	Name       string            `json:"name"`
+	RevisionID string            `json:"revision_id"`
+	StartedAt  time.Time         `json:"started_at"`
+	Iterations []IterationResult `json:"iterations"`
+}
+
 // Executor manages the lifecycle of running agent goroutines.
 // It is owned by the Server and operates on the shared Store.
 type Executor struct {
@@ -107,8 +118,9 @@ type Executor struct {
 	rootCtx   context.Context
 	rootStop  context.CancelFunc
 
-	mu   sync.Mutex
-	runs map[string]*AgentRun // keyed by agent name
+	mu          sync.Mutex
+	runs        map[string]*AgentRun // keyed by agent name
+	onIteration func(agentName string) // called after each iteration completes
 }
 
 // NewExecutor creates an executor bound to a store and a claude invocation
@@ -256,13 +268,25 @@ func (e *Executor) runAgent(ctx context.Context, run *AgentRun, prompt string) {
 			// Claude failed mid-iteration: record error, continue to next.
 			ir.Error = err.Error()
 			run.addIteration(ir)
+			e.fireOnIteration(run.Name)
 			log.Printf("executor: agent %q iteration %d failed: %v (continuing)", run.Name, iteration, err)
 			continue
 		}
 
 		ir.Output = output
 		run.addIteration(ir)
+		e.fireOnIteration(run.Name)
 		log.Printf("executor: agent %q iteration %d complete (%d bytes output)", run.Name, iteration, len(output))
+	}
+}
+
+// fireOnIteration calls the onIteration callback if set.
+func (e *Executor) fireOnIteration(agentName string) {
+	e.mu.Lock()
+	fn := e.onIteration
+	e.mu.Unlock()
+	if fn != nil {
+		fn(agentName)
 	}
 }
 
@@ -376,6 +400,38 @@ func (e *Executor) RunningAgents() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// OnIteration registers a callback invoked after each iteration completes.
+// This is used by the server to trigger state pushes to steer clients when
+// new iteration data is available, since Store.OnChange only fires on
+// store mutations (apply, state changes), not iteration completions.
+func (e *Executor) OnIteration(fn func(agentName string)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onIteration = fn
+}
+
+// Snapshot returns a map of agent name → run snapshot for all running agents.
+// Used by the server to include iteration data in SteerStatePayload.
+func (e *Executor) Snapshot() map[string]AgentRunSnapshot {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := make(map[string]AgentRunSnapshot, len(e.runs))
+	for name, run := range e.runs {
+		iters := run.SnapshotIterations()
+		// Cap to last 10 iterations to limit payload size.
+		if len(iters) > 10 {
+			iters = iters[len(iters)-10:]
+		}
+		result[name] = AgentRunSnapshot{
+			Name:       run.Name,
+			RevisionID: run.RevisionID,
+			StartedAt:  run.StartedAt,
+			Iterations: iters,
+		}
+	}
+	return result
 }
 
 // StartPending scans the store for agents in pending state and starts them.

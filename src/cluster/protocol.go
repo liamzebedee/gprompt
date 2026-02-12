@@ -41,8 +41,12 @@ type ApplyResponse struct {
 type SteerSubscribeRequest struct{}
 
 // SteerStatePayload pushes full cluster state to a steer client.
+// Objects contains the declarative state (definitions, revisions, run state).
+// Runs contains runtime iteration data for running agents — this is ephemeral
+// and NOT persisted to disk, only sent to steer clients for observation.
 type SteerStatePayload struct {
-	Objects []ClusterObject `json:"objects"`
+	Objects []ClusterObject            `json:"objects"`
+	Runs    map[string]AgentRunSnapshot `json:"runs,omitempty"`
 }
 
 // SteerInjectRequest sends a human message into an agent's conversation.

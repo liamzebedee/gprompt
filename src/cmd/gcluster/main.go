@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"p2p/cluster"
 	"p2p/parser"
 	"p2p/pipeline"
@@ -278,8 +280,41 @@ func printApplySummary(s cluster.ApplySummary) {
 	}
 }
 
+// cmdSteer opens the steering TUI connected to the master.
+// It subscribes for state updates and presents a two-pane view:
+// tree sidebar showing agents/loops/iterations, and a detail view
+// for the currently selected node.
 func cmdSteer(args []string) {
-	fmt.Println("gcluster steer: not implemented yet")
+	addr := cluster.DefaultAddr
+
+	// Parse flags
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--addr":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "--addr requires an argument\n")
+				os.Exit(1)
+			}
+			addr = args[i+1]
+			i++
+		}
+	}
+
+	// Connect to master
+	client, err := cluster.NewSteerClient(addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	// Run TUI
+	model := cluster.NewTUIModel(client)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // loadStdlib loads the standard library into the registry, searching

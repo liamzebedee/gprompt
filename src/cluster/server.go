@@ -64,6 +64,12 @@ func NewServer(store *Store, addr string, claudeFn ...ClaudeFunc) *Server {
 	// Create executor if a claude function was provided.
 	if len(claudeFn) > 0 && claudeFn[0] != nil {
 		s.executor = NewExecutor(store, claudeFn[0])
+		// Push state to steer clients after each iteration completes,
+		// so they see new iteration data in real time.
+		s.executor.OnIteration(func(agentName string) {
+			objects := store.ListAgents()
+			s.pushState(objects)
+		})
 	}
 
 	// Wire up state change notifications to push to steer clients.
@@ -226,9 +232,12 @@ func (s *Server) handleSteerSubscribe(conn net.Conn) {
 	s.steerClients[conn] = true
 	s.mu.Unlock()
 
-	// Send current state immediately
+	// Send current state immediately (including run data if executor exists)
 	objects := s.store.ListAgents()
 	payload := SteerStatePayload{Objects: objects}
+	if s.executor != nil {
+		payload.Runs = s.executor.Snapshot()
+	}
 	s.sendResponse(conn, MsgSteerState, payload)
 
 	// Keep connection alive — read until EOF or error
@@ -267,9 +276,13 @@ func (s *Server) handleSteerInject(env *Envelope) {
 }
 
 // pushState sends the current cluster state to all subscribed steer clients.
-// Called by the store's OnChange callback after every mutation.
+// Called by the store's OnChange callback after every mutation, and by the
+// executor's OnIteration callback after each iteration completes.
 func (s *Server) pushState(objects []ClusterObject) {
 	payload := SteerStatePayload{Objects: objects}
+	if s.executor != nil {
+		payload.Runs = s.executor.Snapshot()
+	}
 	env, err := NewEnvelope(MsgSteerState, payload)
 	if err != nil {
 		log.Printf("pushState marshal error: %v", err)
