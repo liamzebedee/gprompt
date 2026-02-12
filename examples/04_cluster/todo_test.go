@@ -2226,6 +2226,158 @@ func TestUpcomingRejectsNegativeDays(t *testing.T) {
 	}
 }
 
+// --- Archive tests ---
+
+func TestArchiveEmpty(t *testing.T) {
+	s := tempStore(t)
+	count, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 archived from empty store, got %d", count)
+	}
+}
+
+func TestArchiveNoDoneItems(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Pending task")
+	s.Add("Another pending")
+
+	count, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 archived, got %d", count)
+	}
+	if len(s.Items) != 2 {
+		t.Errorf("expected 2 items remaining, got %d", len(s.Items))
+	}
+}
+
+func TestArchiveMovesOnlyDone(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.archiveFile()) })
+
+	_, _ = s.Add("Pending task")
+	done1, _ := s.Add("Done task 1")
+	_, _ = s.Add("In-progress task")
+	done2, _ := s.Add("Done task 2")
+	s.SetStatus(done1.ID, StatusDone)
+	s.SetStatus(done2.ID, StatusDone)
+	s.SetStatus(3, StatusInProgress)
+
+	count, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 archived, got %d", count)
+	}
+	if len(s.Items) != 2 {
+		t.Errorf("expected 2 items remaining, got %d", len(s.Items))
+	}
+	// Verify done items are gone from active store.
+	for _, item := range s.Items {
+		if item.Status == StatusDone {
+			t.Errorf("done item %d should have been archived", item.ID)
+		}
+	}
+
+	// Verify archive file contains the done items.
+	archStore := NewStore(s.archiveFile())
+	if err := archStore.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(archStore.Items) != 2 {
+		t.Fatalf("expected 2 items in archive, got %d", len(archStore.Items))
+	}
+	if archStore.Items[0].Title != "Done task 1" || archStore.Items[1].Title != "Done task 2" {
+		t.Errorf("unexpected archive contents: %v", archStore.Items)
+	}
+}
+
+func TestArchiveAppendsToExisting(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.archiveFile()) })
+
+	// First archive.
+	done1, _ := s.Add("First done")
+	s.SetStatus(done1.ID, StatusDone)
+	s.Save()
+	count, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 archived, got %d", count)
+	}
+	s.Save()
+
+	// Second archive.
+	done2, _ := s.Add("Second done")
+	s.SetStatus(done2.ID, StatusDone)
+	s.Save()
+	count, err = s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 archived, got %d", count)
+	}
+
+	// Archive should now have both items.
+	archStore := NewStore(s.archiveFile())
+	if err := archStore.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(archStore.Items) != 2 {
+		t.Errorf("expected 2 items in archive after two archive ops, got %d", len(archStore.Items))
+	}
+}
+
+func TestArchivePreservesItemData(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.archiveFile()) })
+
+	due, _ := ParseDueDate("2025-06-15")
+	item, _ := s.AddFullWithTags("Archived task", PriorityHigh, due, []string{"work", "urgent"})
+	s.SetStatus(item.ID, StatusDone)
+
+	_, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archStore := NewStore(s.archiveFile())
+	if err := archStore.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(archStore.Items) != 1 {
+		t.Fatalf("expected 1 item in archive, got %d", len(archStore.Items))
+	}
+	a := archStore.Items[0]
+	if a.Title != "Archived task" {
+		t.Errorf("expected title 'Archived task', got %q", a.Title)
+	}
+	if a.Priority != PriorityHigh {
+		t.Errorf("expected priority high, got %q", a.Priority)
+	}
+	if !a.DueDate.Valid || a.DueDate.String() != "2025-06-15" {
+		t.Errorf("expected due date 2025-06-15, got %q", a.DueDate.String())
+	}
+	if len(a.Tags) != 2 || a.Tags[0] != "work" || a.Tags[1] != "urgent" {
+		t.Errorf("expected tags [work urgent], got %v", a.Tags)
+	}
+	if a.Status != StatusDone {
+		t.Errorf("expected status done, got %s", a.Status)
+	}
+	if a.ID != item.ID {
+		t.Errorf("expected original ID %d, got %d", item.ID, a.ID)
+	}
+}
+
 func TestUndoRestoresTags(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })

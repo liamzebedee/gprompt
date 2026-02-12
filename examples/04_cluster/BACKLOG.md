@@ -2,9 +2,9 @@
 
 ## Pending
 
-(none currently)
-
 ## Completed
+
+- [x] Add `todo archive` command to move completed items to a separate archive file (preserves history unlike `clear`)
 
 - [x] Add `todo overdue` and `todo upcoming [days]` commands to filter items by due date urgency
 

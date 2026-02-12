@@ -37,6 +37,7 @@ Commands:
   overdue             List items that are past their due date
   upcoming [days]     List items due today or within N days (default: 7)
   sort <field>        Sort items by: priority, due, status, created
+  archive             Move completed items to an archive file
   clear               Remove all completed items
   undo                Revert the last change
   export              Output all items as CSV
@@ -473,6 +474,26 @@ func main() {
 		items, _ := store.List("")
 		if len(items) > 0 {
 			printItems(items, color)
+		}
+
+	case "archive":
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		count, err := store.Archive()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		if count == 0 {
+			fmt.Println("No completed items to archive.")
+		} else {
+			fmt.Printf("Archived %d completed item(s).\n", count)
 		}
 
 	case "clear":

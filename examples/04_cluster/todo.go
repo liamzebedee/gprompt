@@ -747,6 +747,49 @@ func (s *Store) Upcoming(days int) ([]Item, error) {
 	return result, nil
 }
 
+// archiveFile returns the path to the archive file for this store.
+func (s *Store) archiveFile() string {
+	return s.file + ".archive"
+}
+
+// Archive moves all completed (done) items to a separate archive file and
+// removes them from the active store. The archive file uses the same JSON
+// envelope format as the main store (next_id + items). Archived items keep
+// their original IDs. Returns the number of items archived.
+func (s *Store) Archive() (int, error) {
+	// Collect done items.
+	var archived []Item
+	var kept []Item
+	for _, item := range s.Items {
+		if item.Status == StatusDone {
+			archived = append(archived, item)
+		} else {
+			kept = append(kept, item)
+		}
+	}
+	if len(archived) == 0 {
+		return 0, nil
+	}
+
+	// Load existing archive (if any) and append.
+	archStore := NewStore(s.archiveFile())
+	if err := archStore.Load(); err != nil {
+		return 0, fmt.Errorf("loading archive file: %w", err)
+	}
+	archStore.Items = append(archStore.Items, archived...)
+	// Keep NextID in the archive in sync so IDs don't collide if the archive
+	// is ever imported back.
+	if s.NextID > archStore.NextID {
+		archStore.NextID = s.NextID
+	}
+	if err := archStore.Save(); err != nil {
+		return 0, fmt.Errorf("saving archive file: %w", err)
+	}
+
+	s.Items = kept
+	return len(archived), nil
+}
+
 // FormatTags returns a comma-separated string of tags, or "-" if empty.
 func FormatTags(tags []string) string {
 	if len(tags) == 0 {
