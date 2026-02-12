@@ -15,10 +15,10 @@ term 3
 
 each terminal you can kinda switch between agents usnig the tree pane on the left
 
-The terminals don't actually start agents themselves. They connect to the control plane run by `gcluster`
+The terminals don't actually start agents themselves. They connect to the control plane run by `gcluster master`
 
-```
-gcluster cluster
+```sh
+gcluster master
 gcluster apply agents.p
 ``` 
 
@@ -40,7 +40,7 @@ P language syntax is defined in the [language spec](/docs/p-lang-spec.md) and is
 
 Hashing this S-Expression forms the basis of stable ID's. 
 
-`gcluster cluster` stores the agent definitions as real cluster objects, with stable IDs and revision history. If agents.p changes later, applying again creates new revisions. Old runs stay attached to the old revision
+`gcluster master` stores the agent definitions as real cluster objects, with stable IDs and revision history. If agents.p changes later, applying again creates new revisions. Old runs stay attached to the old revision
 
 
 ## UX.
@@ -49,7 +49,7 @@ Hashing this S-Expression forms the basis of stable ID's.
 
 This is how the new prompt file will support native agent orchestration to start with:
 
-```
+```yaml
 # agents.p
 build:
     Read BACKLOG.md, pick one item, build it out, git commit, then mark as complete.
@@ -84,7 +84,7 @@ I want to detect agent[*] blocks as agent blocks.
 
 ### TUI.
 
-`gprompt --ui agents.p` will show a new type of interface.
+`gcluster steer agents.p` will show a new type of interface.
 
 A terminal based ui for overviewing contexts
 - it consists of a tree sidebar on the left. 
