@@ -174,17 +174,118 @@ Still, you can do that with `./loop.sh bugfix` and `./loop.sh build`
 
 But what if you didn't have to?
 
-## Autoscaled agents
+## Designing agent clusters (teams)
+
+The most annoying part of Ralph and Claude is managing your terminals and sessions.
+
+You already have a folder full of prompts, which you have to manually copy-paste/cat into claude. If you want loops, that's another level - writing `loop.sh`. P fixes all that.
+
+The next problem is now you have to run `./loop.sh bugfix` and `./loop.sh build` in different terminals. And restart them when you improve your prompts.
+
+It'd be great if you could just write out the "layout" of your team and just run it. Something like: 
 
 ```yaml
-agent1:
-	loop(build)
+agent-builder:
+    loop(build)
 
-agent2:
-	loop(bugfix)
+agent-bugfixer:
+    loop(bugfix)
+
+agent-release-manager:
+    loop(releasemgmt)
 ```
 
-`gprompt agents.p`
+And then run `start agents.p` and it starts them all up.
+
+Something like this:
+
+```txt
+┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+│ Agents                                        │                                                                          │
+│ ────────────────────────────────────────────  │ ● Now let me run the next iteration.                                     │
+│ [ Search agents...                      ]     │                                                                          │
+│                                               │ ● Explore(Read BACKLOG.md)                                               │
+│ ▾ builder                                     │   ⎿  Done (3 tool uses · 8.2k tokens · 22s)                             │
+│   ▾ loop(build)                               │                                                                          │
+│     ▸ **iteration 3**                         │ ● Pick item, implement, commit.                                          │
+│       iteration 2                             │                                                                          │
+│       iteration 1                             │ ● Task(Fix failing tests)                                                │
+│       iteration 0                             │   ⎿  Done (0 tool uses · 4.1k tokens · 12s)                             │
+│                                               │                                                                          │
+│ ▸ bugfixer                                    │ ● Write(src/feature.go)                                                  │
+│   ▸ loop(bugfix)                              │   ⎿  Wrote 41 lines to src/feature.go                                   │
+│                                               │                                                                          │
+│ ▸ release-manager                             │ ● Done. Summary: shipped one change, tests green.                        │
+│   ▸ loop(releasemgmt)                         │                                                                          │
+│                                               │                                                                          │
+│                                               │ ───────────────────────────────────────────────────────────────────────  │
+│                                               │ ❯ send message…                                                          │
+└───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+```
+
+On the right, you've got something new - it's a tree of contexts. And on the right, you have your regular Claude Code view. 
+
+You can swap into any agent to intercept and steer them. 
+
+Or you could just have a look.
+
+Steering might happen at different levels too. Just like how software sometimes has bugs at different levels - we want to drop into different agents, subagents, and prompts.
+
+That's why we want to see a tree of contexts, not just a list of agents.
+
+**What's different to most approaches** is that the tree allows you to explore all parts of your autonomous loops: an agent, a build loop, individual iterations of a loop. 
+
+For example, what if your build loop isn't working? Could we steer the loop prompt instead of just the loop iteration? Yes. We just jump one level up. 
+
+```
+┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+│ Agents                                        │                                                                          │
+│ ────────────────────────────────────────────  │ Prompt                                           │ Stats                  │
+│ [ Search contexts...                      ]   │                                                  │                        │
+│                                               │ build:                                           │ iterations      4      │
+│ ▾ builder                                     │   Read BACKLOG.md, pick one item, build it out,  │ mean(duration)  38s    │
+│   ▸ **loop(build)**                           │   git commit, then mark as complete.             │ stddev(duration) 9s    │
+│       iteration 3                             │                                                  │ mean(tokens)    8.2k   │
+│       iteration 2                             │                                                  │ stddev(tokens)  1.1k   │
+│       iteration 1                             │                                                  │                        │
+│       iteration 0                             │                                                  │                        │
+│                                               │                                                  │                        │
+│ ▸ bugfixer                                    │                                                  │                        │
+│   ▸ loop(bugfix)                              │                                                  │                        │
+│                                               │                                                  │                        │
+│ ▸ release-manager                             │                                                  │                        │
+│   ▸ loop(releasemgmt)                         │                                                  │                        │
+│                                               │                                                  │                        │
+│                                               │ ───────────────────────────────────────────────  │                        | 
+│                                               │ ❯ edit prompt…                                                            │
+└───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+```
+
+Here we can issue commands to edit the prompt. We might even run simulations to test the prompt is better than the new one. On the right you see performance characteristics - imagine our AI as a Kaizen manufacturing system! Number of iterations, mean duration and standard deviation of each iteration's duration.
+
+How do we make this work? Well, we take inspiration from Kubernetes. We define a cluster of agents declaratively in source code (`.p` files). We spin them up by sending that definition to a cluster manager, which creates the agent processes and manages them. We login to the cluster and steer it by connecting to that cluster manager node. 
+
+```sh
+# Start cluster manager
+gcluster master
+
+# Deploy the agents
+gcluster apply agents.p
+
+# Login and steer
+gcluster steer agents.p # term 1
+gcluster steer agents.p # term 2
+gcluster steer agents.p # term 3
+```
+
+If we think of another agent we need, we can simply add it to `agents.p` and re-run `gcluster apply agents.p`. It will be added to the cluster. 
+
+
+
+## Scaling agent clusters (autonomous creation of subagents)
+
+
+
 
 ---
 

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"p2p/compiler"
 	"p2p/debug"
@@ -14,6 +17,10 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	defer debug.Cleanup()
+
 	args := os.Args[1:]
 	var evalExpr string
 	for i := 0; i < len(args); i++ {
@@ -109,7 +116,7 @@ func main() {
 			return
 		}
 		debug.LogPrompt("COMPILED", 1, plan.Prompt)
-		if err := runtime.Execute(plan.Prompt); err != nil {
+		if err := runtime.Execute(ctx, plan.Prompt); err != nil {
 			fmt.Fprintf(os.Stderr, "\nruntime error: %v\n", err)
 			os.Exit(1)
 		}
@@ -117,7 +124,7 @@ func main() {
 
 	case compiler.PlanPipeline:
 		debug.Log("executing pipeline with %d steps, args=%v", len(plan.Pipeline.Steps), plan.Args)
-		if err := runtime.ExecutePipeline(plan.Pipeline, plan.Args, reg, plan.Preamble); err != nil {
+		if err := runtime.ExecutePipeline(ctx, plan.Pipeline, plan.Args, reg, plan.Preamble); err != nil {
 			fmt.Fprintf(os.Stderr, "\npipeline error: %v\n", err)
 			os.Exit(1)
 		}

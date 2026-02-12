@@ -47,5 +47,7 @@ cd src && make clean    # Removes binaries
 
 ## Notes
 
+- Use `cd src && make all` instead of `go build`
+
 - stdlib.p is embedded via `p2p/stdlib`; also searched on disk relative to input file, CWD, and binary location
 - Requires `claude` CLI in PATH

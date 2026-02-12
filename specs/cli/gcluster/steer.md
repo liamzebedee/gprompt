@@ -18,6 +18,53 @@ Two panes side by side:
 - **Left (tree sidebar)**: navigable tree of all agents and their substructure.
 - **Right (detail view)**: content for the currently highlighted node.
 
+```
+┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+│ Agents                                        │                                                                          │
+│ ────────────────────────────────────────────  │ ● Now let me run the next iteration.                                     │
+│ [ Search agents...                      ]     │                                                                          │
+│                                               │ ● Explore(Read BACKLOG.md)                                               │
+│ ▾ builder                                     │   ⎿  Done (3 tool uses · 8.2k tokens · 22s)                             │
+│   ▾ loop(build)                               │                                                                          │
+│     ▸ **iteration 3**                         │ ● Pick item, implement, commit.                                          │
+│       iteration 2                             │                                                                          │
+│       iteration 1                             │ ● Task(Fix failing tests)                                                │
+│       iteration 0                             │   ⎿  Done (0 tool uses · 4.1k tokens · 12s)                             │
+│                                               │                                                                          │
+│ ▸ bugfixer                                    │ ● Write(src/feature.go)                                                  │
+│   ▸ loop(bugfix)                              │   ⎿  Wrote 41 lines to src/feature.go                                   │
+│                                               │                                                                          │
+│ ▸ release-manager                             │ ● Done. Summary: shipped one change, tests green.                        │
+│   ▸ loop(releasemgmt)                         │                                                                          │
+│                                               │                                                                          │
+│                                               │ ───────────────────────────────────────────────────────────────────────  │
+│                                               │ ❯ send message…                                                          │
+└───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+│ Agents                                        │                                                                          │
+│ ────────────────────────────────────────────  │ Prompt                                           │ Stats                  │
+│ [ Search contexts...                      ]   │                                                  │                        │
+│                                               │ build:                                           │ iterations      4      │
+│ ▾ builder                                     │   Read BACKLOG.md, pick one item, build it out,  │ mean(duration)  38s    │
+│   ▸ **loop(build)**                           │   git commit, then mark as complete.             │ stddev(duration) 9s    │
+│       iteration 3                             │                                                  │ mean(tokens)    8.2k   │
+│       iteration 2                             │                                                  │ stddev(tokens)  1.1k   │
+│       iteration 1                             │                                                  │                        │
+│       iteration 0                             │                                                  │                        │
+│                                               │                                                  │                        │
+│ ▸ bugfixer                                    │                                                  │                        │
+│   ▸ loop(bugfix)                              │                                                  │                        │
+│                                               │                                                  │                        │
+│ ▸ release-manager                             │                                                  │                        │
+│   ▸ loop(releasemgmt)                         │                                                  │                        │
+│                                               │                                                  │                        │
+│                                               │ ───────────────────────────────────────────────  │                        | 
+│                                               │ ❯ edit prompt…                                                            │
+└───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+```
+
+
 ### Tree sidebar
 
 Displays all agents in the cluster as a navigable tree.
@@ -42,6 +89,7 @@ release-manager
 - **Search**: a text input at the top filters the tree by name.
 - **Loop children**: loop nodes show their iterations as children. Maximum 4 most recent iterations displayed. The latest iteration is listed first and displayed in bold.
 - **Live updates**: new iterations appear in the tree as they start, without requiring manual refresh.
+- **Shift+Tab** to swap between tree and input.
 
 ### Detail views
 
