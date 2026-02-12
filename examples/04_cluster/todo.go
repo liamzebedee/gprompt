@@ -601,6 +601,52 @@ func (s *Store) RemoveTag(id int, tag string) error {
 	return nil
 }
 
+// RenameTag renames a tag across all items in the store. Both old and new tag
+// names are normalised (trimmed, lowercased). Returns the number of items updated.
+func (s *Store) RenameTag(oldTag, newTag string) (int, error) {
+	oldTag = strings.TrimSpace(strings.ToLower(oldTag))
+	newTag = strings.TrimSpace(strings.ToLower(newTag))
+	if oldTag == "" {
+		return 0, fmt.Errorf("old tag must not be empty")
+	}
+	if newTag == "" {
+		return 0, fmt.Errorf("new tag must not be empty")
+	}
+	if strings.Contains(newTag, ";") {
+		return 0, fmt.Errorf("tag must not contain semicolon: %q", newTag)
+	}
+	if oldTag == newTag {
+		return 0, fmt.Errorf("old and new tag are the same: %q", oldTag)
+	}
+	count := 0
+	now := time.Now()
+	for i := range s.Items {
+		item := &s.Items[i]
+		idx := -1
+		for j, t := range item.Tags {
+			if strings.ToLower(t) == oldTag {
+				idx = j
+				break
+			}
+		}
+		if idx == -1 {
+			continue
+		}
+		// If the item already has the new tag, just remove the old one to avoid duplicates.
+		if item.HasTag(newTag) {
+			item.Tags = append(item.Tags[:idx], item.Tags[idx+1:]...)
+		} else {
+			item.Tags[idx] = newTag
+		}
+		item.UpdatedAt = now
+		count++
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("no items have tag %q", oldTag)
+	}
+	return count, nil
+}
+
 // ListByTag returns items that have the given tag (case-insensitive).
 func (s *Store) ListByTag(tag string) ([]Item, error) {
 	tag = strings.TrimSpace(tag)

@@ -2378,6 +2378,127 @@ func TestArchivePreservesItemData(t *testing.T) {
 	}
 }
 
+func TestRenameTag(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Task A", PriorityNone, DueDate{}, []string{"work"})
+	_, _ = s.AddFullWithTags("Task B", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	_, _ = s.AddFullWithTags("Task C", PriorityNone, DueDate{}, []string{"home"})
+	s.Save()
+
+	count, err := s.RenameTag("work", "office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 items renamed, got %d", count)
+	}
+
+	a, _ := s.Get(1)
+	if !a.HasTag("office") || a.HasTag("work") {
+		t.Errorf("item 1: expected [office], got %v", a.Tags)
+	}
+	b, _ := s.Get(2)
+	if !b.HasTag("office") || b.HasTag("work") {
+		t.Errorf("item 2: expected office tag, got %v", b.Tags)
+	}
+	if !b.HasTag("urgent") {
+		t.Errorf("item 2: expected urgent tag preserved, got %v", b.Tags)
+	}
+	c, _ := s.Get(3)
+	if !c.HasTag("home") {
+		t.Errorf("item 3: expected [home] unchanged, got %v", c.Tags)
+	}
+}
+
+func TestRenameTagDeduplicates(t *testing.T) {
+	s := tempStore(t)
+	// Item has both "old" and "new" tags — renaming should deduplicate.
+	_, _ = s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"old", "new"})
+	s.Save()
+
+	count, err := s.RenameTag("old", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 item updated, got %d", count)
+	}
+	item, _ := s.Get(1)
+	// Should only have "new" once, not duplicated.
+	newCount := 0
+	for _, tag := range item.Tags {
+		if tag == "new" {
+			newCount++
+		}
+	}
+	if newCount != 1 {
+		t.Errorf("expected exactly 1 'new' tag, got %d in %v", newCount, item.Tags)
+	}
+	if item.HasTag("old") {
+		t.Errorf("expected 'old' tag removed, got %v", item.Tags)
+	}
+}
+
+func TestRenameTagEmptyOld(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.RenameTag("", "new")
+	if err == nil {
+		t.Fatal("expected error for empty old tag")
+	}
+}
+
+func TestRenameTagEmptyNew(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.RenameTag("old", "")
+	if err == nil {
+		t.Fatal("expected error for empty new tag")
+	}
+}
+
+func TestRenameTagSameName(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.RenameTag("work", "work")
+	if err == nil {
+		t.Fatal("expected error for same old and new tag")
+	}
+}
+
+func TestRenameTagNotFound(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"home"})
+	s.Save()
+	_, err := s.RenameTag("nonexistent", "other")
+	if err == nil {
+		t.Fatal("expected error when no items have the tag")
+	}
+}
+
+func TestRenameTagSemicolon(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.RenameTag("old", "semi;colon")
+	if err == nil {
+		t.Fatal("expected error for semicolon in new tag")
+	}
+}
+
+func TestRenameTagCaseInsensitive(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.AddFullWithTags("Task", PriorityNone, DueDate{}, []string{"Work"})
+	s.Save()
+
+	count, err := s.RenameTag("WORK", "office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 item renamed, got %d", count)
+	}
+	item, _ := s.Get(1)
+	if !item.HasTag("office") {
+		t.Errorf("expected office tag, got %v", item.Tags)
+	}
+}
+
 func TestUndoRestoresTags(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })

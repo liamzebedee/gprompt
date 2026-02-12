@@ -32,6 +32,8 @@ Commands:
                       Set or clear an item's due date
   tag <id> <tag>      Add a tag to an item
   untag <id> <tag>    Remove a tag from an item
+  rename-tag <old> <new>
+                      Rename a tag across all items
   search <query>      Search items by title substring
   stats               Show counts by status
   overdue             List items that are past their due date
@@ -345,6 +347,31 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Removed tag %q from #%d.\n", strings.ToLower(strings.TrimSpace(tag)), id)
+
+	case "rename-tag":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo rename-tag <old-tag> <new-tag>")
+			os.Exit(1)
+		}
+		oldTag := os.Args[2]
+		newTag := os.Args[3]
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		count, err := store.RenameTag(oldTag, newTag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Renamed tag %q to %q across %d item(s).\n",
+			strings.ToLower(strings.TrimSpace(oldTag)),
+			strings.ToLower(strings.TrimSpace(newTag)),
+			count)
 
 	case "search":
 		if len(os.Args) < 3 {

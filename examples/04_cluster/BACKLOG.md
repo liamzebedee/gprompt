@@ -4,6 +4,8 @@
 
 ## Completed
 
+- [x] Add `todo rename-tag <old> <new>` command to rename a tag across all items (case-insensitive, deduplicates)
+
 - [x] Add `todo archive` command to move completed items to a separate archive file (preserves history unlike `clear`)
 
 - [x] Add `todo overdue` and `todo upcoming [days]` commands to filter items by due date urgency
