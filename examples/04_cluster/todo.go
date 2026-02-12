@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -100,6 +101,17 @@ func (s *Store) SetStatus(id int, status Status) error {
 	return nil
 }
 
+// Edit updates the title of an existing item.
+func (s *Store) Edit(id int, newTitle string) error {
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	item.Title = newTitle
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
 func (s *Store) Delete(id int) error {
 	for i, item := range s.Items {
 		if item.ID == id {
@@ -108,6 +120,37 @@ func (s *Store) Delete(id int) error {
 		}
 	}
 	return fmt.Errorf("todo #%d not found", id)
+}
+
+// Stats returns a map of status to count for all items.
+func (s *Store) Stats() map[Status]int {
+	counts := map[Status]int{
+		StatusPending:    0,
+		StatusInProgress: 0,
+		StatusDone:       0,
+	}
+	for _, item := range s.Items {
+		counts[item.Status]++
+	}
+	return counts
+}
+
+// Search returns items whose title contains the query (case-insensitive).
+func (s *Store) Search(query string) []Item {
+	lower := strings.ToLower(query)
+	var result []Item
+	for _, item := range s.Items {
+		if strings.Contains(strings.ToLower(item.Title), lower) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// ParseAddTitle joins all arguments after the command into a single title string.
+// This allows users to type multi-word titles without quoting, e.g. "todo add Buy some milk".
+func ParseAddTitle(args []string) string {
+	return strings.Join(args, " ")
 }
 
 func (s *Store) List(filter Status) []Item {

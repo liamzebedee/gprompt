@@ -18,6 +18,8 @@ Commands:
   done <id>           Mark an item as done
   start <id>          Mark an item as in progress
   delete <id>         Delete an item
+  edit <id> <title>   Rename an item
+  stats               Show counts by status
   help                Show this message
 `)
 	os.Exit(1)
@@ -42,7 +44,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: todo add <title>")
 			os.Exit(1)
 		}
-		title := os.Args[2]
+		title := todo.ParseAddTitle(os.Args[2:])
 		item := store.Add(title)
 		if err := store.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
@@ -102,6 +104,38 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Deleted #%d.\n", id)
+
+	case "edit":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo edit <id> <new-title>")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		newTitle := todo.ParseAddTitle(os.Args[3:])
+		if err := store.Edit(id, newTitle); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Renamed #%d to %q.\n", id, newTitle)
+
+	case "stats":
+		stats := store.Stats()
+		total := 0
+		for _, c := range stats {
+			total += c
+		}
+		fmt.Printf("Total:       %d\n", total)
+		fmt.Printf("Pending:     %d\n", stats[todo.StatusPending])
+		fmt.Printf("In Progress: %d\n", stats[todo.StatusInProgress])
+		fmt.Printf("Done:        %d\n", stats[todo.StatusDone])
 
 	case "help":
 		usage()

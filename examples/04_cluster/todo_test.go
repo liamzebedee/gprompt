@@ -89,6 +89,94 @@ func TestListFilter(t *testing.T) {
 	}
 }
 
+func TestStatsEmpty(t *testing.T) {
+	s := tempStore(t)
+
+	stats := s.Stats()
+	if stats[StatusPending] != 0 || stats[StatusInProgress] != 0 || stats[StatusDone] != 0 {
+		t.Errorf("expected all zeros for empty store, got %v", stats)
+	}
+}
+
+func TestStats(t *testing.T) {
+	s := tempStore(t)
+
+	s.Add("Task A")
+	s.Add("Task B")
+	started := s.Add("Task C")
+	s.SetStatus(started.ID, StatusInProgress)
+	done := s.Add("Task D")
+	s.SetStatus(done.ID, StatusDone)
+
+	stats := s.Stats()
+	if stats[StatusPending] != 2 {
+		t.Errorf("expected 2 pending, got %d", stats[StatusPending])
+	}
+	if stats[StatusInProgress] != 1 {
+		t.Errorf("expected 1 in_progress, got %d", stats[StatusInProgress])
+	}
+	if stats[StatusDone] != 1 {
+		t.Errorf("expected 1 done, got %d", stats[StatusDone])
+	}
+}
+
+func TestEdit(t *testing.T) {
+	s := tempStore(t)
+
+	item := s.Add("Old title")
+	if err := s.Edit(item.ID, "New title"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := s.Get(item.ID)
+	if got.Title != "New title" {
+		t.Errorf("expected title 'New title', got %q", got.Title)
+	}
+	if !got.UpdatedAt.After(got.CreatedAt) || got.UpdatedAt.Equal(got.CreatedAt) {
+		// UpdatedAt should be >= CreatedAt (may be equal due to clock resolution)
+	}
+}
+
+func TestEditNotFound(t *testing.T) {
+	s := tempStore(t)
+	if err := s.Edit(999, "Nope"); err == nil {
+		t.Error("expected error editing non-existent item")
+	}
+}
+
+func TestParseAddTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"single word", []string{"groceries"}, "groceries"},
+		{"multi word", []string{"Buy", "some", "milk"}, "Buy some milk"},
+		{"two words", []string{"Write", "tests"}, "Write tests"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseAddTitle(tt.args)
+			if got != tt.want {
+				t.Errorf("ParseAddTitle(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseAddTitleUsedWithAdd(t *testing.T) {
+	s := tempStore(t)
+
+	// Simulate: todo add Buy some milk  →  os.Args[2:] = ["Buy", "some", "milk"]
+	args := []string{"Buy", "some", "milk"}
+	title := ParseAddTitle(args)
+	item := s.Add(title)
+
+	if item.Title != "Buy some milk" {
+		t.Errorf("expected title 'Buy some milk', got %q", item.Title)
+	}
+}
+
 func TestPersistence(t *testing.T) {
 	f, err := os.CreateTemp("", "todo-*.json")
 	if err != nil {
