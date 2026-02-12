@@ -24,6 +24,7 @@ Commands:
   done <id>           Mark an item as done
   start <id>          Mark an item as in progress
   delete <id>         Delete an item
+  show <id>          Show detailed info for an item
   edit <id> <title>   Rename an item
   priority <id> <low|medium|high|none>
                       Set or clear an item's priority
@@ -218,6 +219,15 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Deleted #%d.\n", id)
+
+	case "show":
+		id := requireID()
+		item, err := store.Get(id)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		printItemDetail(item, color)
 
 	case "edit":
 		if len(os.Args) < 4 {
@@ -511,6 +521,25 @@ func printItems(items []todo.Item, color bool) {
 		)
 	}
 	w.Flush()
+}
+
+func printItemDetail(item *todo.Item, color bool) {
+	fmt.Printf("%s  %s\n", todo.ColorLabel("ID:", color), fmt.Sprintf("%d", item.ID))
+	fmt.Printf("%s  %s\n", todo.ColorLabel("Title:", color), item.Title)
+	fmt.Printf("%s  %s\n", todo.ColorLabel("Status:", color), todo.ColorStatus(item.Status, color))
+	if item.Priority != todo.PriorityNone {
+		fmt.Printf("%s  %s\n", todo.ColorLabel("Priority:", color), todo.ColorPriority(item.Priority, color))
+	} else {
+		fmt.Printf("%s  -\n", todo.ColorLabel("Priority:", color))
+	}
+	if item.DueDate.Valid {
+		fmt.Printf("%s  %s\n", todo.ColorLabel("Due:", color), todo.ColorDueDate(item.DueDate, color))
+	} else {
+		fmt.Printf("%s  -\n", todo.ColorLabel("Due:", color))
+	}
+	fmt.Printf("%s  %s\n", todo.ColorLabel("Tags:", color), todo.FormatTags(item.Tags))
+	fmt.Printf("%s  %s\n", todo.ColorLabel("Created:", color), item.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("%s  %s\n", todo.ColorLabel("Updated:", color), item.UpdatedAt.Format("2006-01-02 15:04:05"))
 }
 
 func requireID() int {

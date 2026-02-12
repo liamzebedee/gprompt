@@ -6,6 +6,8 @@
 
 ## Completed
 
+- [x] Add `todo show <id>` command to display detailed information about a single item
+
 - [x] Add `todo import <file.csv>` command to import items from CSV (round-trips with export)
 
 - [x] Add `todo undo` command to revert the last change (snapshot-based single-level undo)
