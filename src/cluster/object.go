@@ -63,6 +63,48 @@ type AgentDef struct {
 	// The executor uses these to construct prompts without needing access to
 	// the parser, registry, or source files.
 	Methods map[string]string `json:"methods,omitempty"`
+	// Pipeline describes the execution structure (step order and types).
+	// Populated at apply time by parsing the agent body. Nil for non-pipeline
+	// agents whose body is used directly as the prompt.
+	Pipeline *PipelineDef `json:"pipeline,omitempty"`
+}
+
+// PipelineStepKind identifies how a pipeline step executes.
+// These mirror the pipeline.StepKind constants but live in the cluster
+// package so the executor can use them without importing pipeline/.
+type PipelineStepKind string
+
+const (
+	StepKindSimple PipelineStepKind = "simple"
+	StepKindMap    PipelineStepKind = "map"
+	StepKindLoop   PipelineStepKind = "loop"
+)
+
+// PipelineStep describes a single step in an agent's pipeline.
+// This is a pure data type suitable for JSON transport from apply to executor.
+type PipelineStep struct {
+	// Label is the output name for this step (e.g., "spec", "plan").
+	Label string `json:"label"`
+	// Kind is "simple", "map", or "loop".
+	Kind PipelineStepKind `json:"kind"`
+	// Method is the method name for simple steps.
+	Method string `json:"method,omitempty"`
+	// LoopMethod is the method name for loop steps.
+	LoopMethod string `json:"loop_method,omitempty"`
+	// MapMethod is the method name for map steps.
+	MapMethod string `json:"map_method,omitempty"`
+	// MapRef is the descriptive name of items for map steps.
+	MapRef string `json:"map_ref,omitempty"`
+}
+
+// PipelineDef describes the full pipeline structure for an agent.
+// Built at apply time from parsing the agent body; sent to the executor
+// so it knows the step order without importing the pipeline package.
+type PipelineDef struct {
+	// InitialInput is the first token before the first -> (e.g., "idea").
+	InitialInput string         `json:"initial_input,omitempty"`
+	// Steps is the ordered list of pipeline steps.
+	Steps        []PipelineStep `json:"steps"`
 }
 
 // ApplySummary reports the outcome of an apply operation.

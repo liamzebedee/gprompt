@@ -202,6 +202,7 @@ func cmdApply(args []string) {
 			Definition: sexpr,
 			ID:         stableID,
 			Methods:    methods,
+			Pipeline:   buildPipelineDef(node),
 		})
 	}
 
@@ -397,6 +398,39 @@ func resolveAgentMethods(node parser.Node, reg *registry.Registry) map[string]st
 	}
 
 	return methods
+}
+
+// buildPipelineDef converts a parsed pipeline from the agent body into a
+// cluster.PipelineDef for transport to the executor. Returns nil if the
+// agent body is not a pipeline (e.g., plain text prompt).
+func buildPipelineDef(node parser.Node) *cluster.PipelineDef {
+	if !pipeline.IsPipeline(node.Body) {
+		return nil
+	}
+	p, err := pipeline.Parse(node.Body)
+	if err != nil {
+		return nil
+	}
+	def := &cluster.PipelineDef{
+		InitialInput: p.InitialInput,
+	}
+	for _, step := range p.Steps {
+		ps := cluster.PipelineStep{Label: step.Label}
+		switch step.Kind {
+		case pipeline.StepSimple:
+			ps.Kind = cluster.StepKindSimple
+			ps.Method = step.Method
+		case pipeline.StepLoop:
+			ps.Kind = cluster.StepKindLoop
+			ps.LoopMethod = step.LoopMethod
+		case pipeline.StepMap:
+			ps.Kind = cluster.StepKindMap
+			ps.MapMethod = step.MapMethod
+			ps.MapRef = step.MapRef
+		}
+		def.Steps = append(def.Steps, ps)
+	}
+	return def
 }
 
 func resolveImport(importPath string, baseDir string) string {

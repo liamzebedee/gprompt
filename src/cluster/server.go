@@ -200,7 +200,8 @@ func (s *Server) handleApply(conn net.Conn, env *Envelope) {
 		return
 	}
 
-	// Cache method bodies from the apply request for executor use.
+	// Cache method bodies and pipeline definitions from the apply request
+	// for executor use when starting agents.
 	s.mu.Lock()
 	for _, def := range req.Agents {
 		if len(def.Methods) > 0 {
@@ -208,6 +209,15 @@ func (s *Server) handleApply(conn net.Conn, env *Envelope) {
 		}
 	}
 	s.mu.Unlock()
+
+	// Pass pipeline definitions to executor so it knows step structure.
+	if s.executor != nil {
+		for _, def := range req.Agents {
+			if def.Pipeline != nil {
+				s.executor.SetPipeline(def.Name, def.Pipeline)
+			}
+		}
+	}
 
 	summary := s.store.ApplyDefinitions(req.Agents)
 	s.sendResponse(conn, MsgApplyResponse, ApplyResponse{Summary: summary})

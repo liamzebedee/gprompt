@@ -2,15 +2,16 @@
 //
 // When the server applies agent definitions, it calls Executor.Start for each
 // agent that is in pending state. The executor spawns a goroutine per agent
-// that runs the agent's pipeline — typically a loop step that repeatedly calls
-// the claude CLI with the method body as prompt.
+// that runs the agent's pipeline — either a simple loop or a multi-step
+// pipeline with simple, map, and loop steps.
 //
 // Design decisions:
 //
-//   - The executor does NOT parse S-expressions. The apply command resolves
-//     method bodies at apply time and sends them alongside the definition in
-//     AgentDef.Methods. This keeps the executor simple and decoupled from
-//     the parser/compiler/sexp packages.
+//   - The executor does NOT parse S-expressions or import the pipeline package.
+//     The apply command resolves method bodies and pipeline structure at apply
+//     time and sends them alongside the definition in AgentDef.Methods and
+//     AgentDef.Pipeline. This keeps the executor decoupled from the
+//     parser/compiler/sexp/pipeline packages.
 //
 //   - Claude invocation is abstracted behind a ClaudeFunc. Production code
 //     injects a function that shells out to the claude CLI; tests inject a
@@ -23,6 +24,11 @@
 //   - On claude failure mid-iteration, the error is recorded on the
 //     IterationResult and the agent continues to the next iteration.
 //     The agent only stops when explicitly stopped or the executor shuts down.
+//
+//   - Multi-step pipelines execute simple and map steps sequentially as setup,
+//     threading each step's output into the next. The final step (typically a
+//     loop) runs the iteration loop. Iteration tracking counts only the loop
+//     step's iterations — setup steps are one-shot initialization.
 //
 //   - Thread safety: the running map is guarded by a mutex. Store mutations
 //     go through Store methods which have their own locks.
@@ -119,14 +125,15 @@ type AgentRunSnapshot struct {
 // Executor manages the lifecycle of running agent goroutines.
 // It is owned by the Server and operates on the shared Store.
 type Executor struct {
-	store     *Store
-	claudeFn  ClaudeFunc
-	rootCtx   context.Context
-	rootStop  context.CancelFunc
+	store    *Store
+	claudeFn ClaudeFunc
+	rootCtx  context.Context
+	rootStop context.CancelFunc
 
 	mu          sync.Mutex
-	runs        map[string]*AgentRun // keyed by agent name
-	onIteration func(agentName string) // called after each iteration completes
+	runs        map[string]*AgentRun   // keyed by agent name
+	pipelines   map[string]*PipelineDef // keyed by agent name, cached from apply
+	onIteration func(agentName string)  // called after each iteration completes
 }
 
 // NewExecutor creates an executor bound to a store and a claude invocation
@@ -135,11 +142,22 @@ type Executor struct {
 func NewExecutor(store *Store, claudeFn ClaudeFunc) *Executor {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Executor{
-		store:    store,
-		claudeFn: claudeFn,
-		rootCtx:  ctx,
-		rootStop: cancel,
-		runs:     make(map[string]*AgentRun),
+		store:     store,
+		claudeFn:  claudeFn,
+		rootCtx:   ctx,
+		rootStop:  cancel,
+		runs:      make(map[string]*AgentRun),
+		pipelines: make(map[string]*PipelineDef),
+	}
+}
+
+// SetPipeline caches a pipeline definition for an agent. Called by the server
+// when processing apply requests so the executor knows the step structure.
+func (e *Executor) SetPipeline(name string, p *PipelineDef) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if p != nil {
+		e.pipelines[name] = p
 	}
 }
 
@@ -164,6 +182,9 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 		e.mu.Unlock()
 		return fmt.Errorf("agent %q not found in store", name)
 	}
+
+	// Grab cached pipeline def if available.
+	pdef := e.pipelines[name]
 	e.mu.Unlock()
 
 	// Transition to running in the store. This is done outside the executor
@@ -193,21 +214,37 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 	e.runs[name] = run
 	e.mu.Unlock()
 
-	// Determine prompt from the agent's pipeline definition.
-	// The agent body is a pipeline. We need to resolve it.
-	prompt, err := e.resolvePrompt(obj, methods)
-	if err != nil {
-		// Cannot start: revert to pending.
-		e.store.SetRunState(name, RunStatePending)
-		e.mu.Lock()
-		delete(e.runs, name)
-		e.mu.Unlock()
-		agentCancel()
-		close(run.done)
-		return fmt.Errorf("agent %q: resolve prompt: %w", name, err)
+	// Choose execution path based on pipeline structure.
+	if pdef != nil && len(pdef.Steps) > 0 {
+		// Multi-step pipeline: execute setup steps then loop.
+		if err := e.validatePipeline(pdef, methods); err != nil {
+			e.store.SetRunState(name, RunStatePending)
+			e.mu.Lock()
+			delete(e.runs, name)
+			e.mu.Unlock()
+			agentCancel()
+			close(run.done)
+			return fmt.Errorf("agent %q: invalid pipeline: %w", name, err)
+		}
+		go e.runPipeline(agentCtx, run, pdef, methods)
+	} else {
+		// Legacy single-method path.
+		prompt, err := e.resolvePrompt(methods)
+		if err != nil {
+			e.store.SetRunState(name, RunStatePending)
+			e.mu.Lock()
+			delete(e.runs, name)
+			e.mu.Unlock()
+			agentCancel()
+			close(run.done)
+			return fmt.Errorf("agent %q: resolve prompt: %w", name, err)
+		}
+		go func() {
+			defer close(run.done)
+			e.runAgentLoop(agentCtx, run, prompt, prompt)
+		}()
 	}
 
-	go e.runAgent(agentCtx, run, prompt)
 	revShort := run.RevisionID
 	if len(revShort) > 8 {
 		revShort = revShort[:8]
@@ -216,24 +253,33 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 	return nil
 }
 
-// resolvePrompt extracts the prompt text for the agent's loop method.
-//
-// The agent's Definition is an S-expression like:
-//   (defagent "builder" (pipeline (step "build" (loop build))))
-//
-// For now, we support the common pattern: a single loop step. The method
-// body for that step comes from the methods map provided at Start time.
-//
-// Future expansion would handle multi-step pipelines, but agents in practice
-// are loop(method) — a single method called repeatedly forever.
-func (e *Executor) resolvePrompt(obj *ClusterObject, methods map[string]string) (string, error) {
-	// We need to find the loop method name from the definition. But rather
-	// than parsing the S-expression here, we rely on the methods map: the
-	// apply command sends all method bodies referenced by the agent. For a
-	// loop(build) agent, methods contains {"build": "Read BACKLOG.md..."}.
-	//
-	// If there's exactly one method, use it. If multiple, we need the
-	// pipeline structure — which is also sent in AgentDef.Pipeline.
+// validatePipeline checks that all methods referenced by pipeline steps exist.
+func (e *Executor) validatePipeline(p *PipelineDef, methods map[string]string) error {
+	for i, step := range p.Steps {
+		var methodName string
+		switch step.Kind {
+		case StepKindSimple:
+			methodName = step.Method
+		case StepKindLoop:
+			methodName = step.LoopMethod
+		case StepKindMap:
+			methodName = step.MapMethod
+		default:
+			return fmt.Errorf("step %d (%s): unknown kind %q", i+1, step.Label, step.Kind)
+		}
+		if methodName == "" {
+			return fmt.Errorf("step %d (%s): no method name", i+1, step.Label)
+		}
+		if _, ok := methods[methodName]; !ok {
+			return fmt.Errorf("step %d (%s): method %q not found in resolved methods", i+1, step.Label, methodName)
+		}
+	}
+	return nil
+}
+
+// resolvePrompt extracts a single prompt from the methods map for legacy
+// single-method agents (no PipelineDef available).
+func (e *Executor) resolvePrompt(methods map[string]string) (string, error) {
 	if len(methods) == 0 {
 		return "", fmt.Errorf("no method bodies provided")
 	}
@@ -242,22 +288,148 @@ func (e *Executor) resolvePrompt(obj *ClusterObject, methods map[string]string) 
 			return body, nil
 		}
 	}
-	// Multiple methods: need pipeline info. For now, return error.
-	// Multi-step pipeline execution is a future extension.
-	return "", fmt.Errorf("multi-step pipelines not yet supported in executor (got %d methods)", len(methods))
+	return "", fmt.Errorf("multiple methods provided but no pipeline structure; cannot determine execution order")
 }
 
-// runAgent is the goroutine body for a running agent. It loops forever,
-// calling claude with the prompt each iteration, until the context is
-// cancelled (agent stopped or executor shut down).
+// runPipeline executes a multi-step pipeline. Steps before the final loop
+// run once (simple) or fan-out (map), threading output between steps.
+// The final step, if a loop, runs forever with iteration tracking.
+// If all steps are non-loop, the pipeline runs once to completion.
 //
-// Between iterations, the goroutine drains the inject channel for any
-// steering messages from steer clients. Injected messages are prepended
-// to the base prompt for the next iteration, allowing humans to nudge
-// the agent's behaviour without restarting it.
-func (e *Executor) runAgent(ctx context.Context, run *AgentRun, prompt string) {
+// Why iteration tracking only covers the loop step: simple and map steps
+// are one-shot setup. The loop step is where the agent does ongoing work,
+// and it's what steer clients observe and steer. Tracking only loop
+// iterations keeps the model simple and matches the TUI's expectations.
+func (e *Executor) runPipeline(ctx context.Context, run *AgentRun, p *PipelineDef, methods map[string]string) {
 	defer close(run.done)
 
+	var prevOutput string
+
+	for i, step := range p.Steps {
+		// Check cancellation between steps.
+		select {
+		case <-ctx.Done():
+			log.Printf("executor: agent %q pipeline cancelled at step %d (%s)", run.Name, i+1, step.Label)
+			return
+		default:
+		}
+
+		switch step.Kind {
+		case StepKindSimple:
+			body := methods[step.Method]
+			prompt := body
+			if prevOutput != "" {
+				prompt = prevOutput + "\n\n" + body
+			}
+
+			log.Printf("executor: agent %q running simple step %d/%d (%s)", run.Name, i+1, len(p.Steps), step.Label)
+			output, err := e.claudeFn(ctx, prompt)
+			if err != nil {
+				if ctx.Err() != nil {
+					log.Printf("executor: agent %q step %d (%s) cancelled", run.Name, i+1, step.Label)
+					return
+				}
+				// Setup step failure aborts the pipeline. Record it as a
+				// failed iteration so steer clients can see what happened.
+				log.Printf("executor: agent %q step %d (%s) failed: %v — pipeline aborted", run.Name, i+1, step.Label, err)
+				run.addIteration(IterationResult{
+					Iteration:  1,
+					StartedAt:  time.Now(),
+					FinishedAt: time.Now(),
+					Error:      fmt.Sprintf("pipeline step %d (%s): %v", i+1, step.Label, err),
+				})
+				e.fireOnIteration(run.Name)
+				return
+			}
+			prevOutput = output
+			log.Printf("executor: agent %q step %d (%s) complete (%d bytes)", run.Name, i+1, step.Label, len(output))
+
+		case StepKindMap:
+			body := methods[step.MapMethod]
+			items := splitItems(prevOutput)
+			if len(items) == 0 {
+				log.Printf("executor: agent %q step %d (%s): map got 0 items — pipeline aborted", run.Name, i+1, step.Label)
+				run.addIteration(IterationResult{
+					Iteration:  1,
+					StartedAt:  time.Now(),
+					FinishedAt: time.Now(),
+					Error:      fmt.Sprintf("pipeline step %d (%s): map got 0 items from previous output", i+1, step.Label),
+				})
+				e.fireOnIteration(run.Name)
+				return
+			}
+
+			log.Printf("executor: agent %q running map step %d/%d (%s) with %d items", run.Name, i+1, len(p.Steps), step.Label, len(items))
+
+			results := make([]string, len(items))
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			var firstErr error
+
+			mapCtx, mapCancel := context.WithCancel(ctx)
+			for j, item := range items {
+				wg.Add(1)
+				go func(idx int, itemText string) {
+					defer wg.Done()
+					prompt := itemText + "\n\n" + body
+					result, err := e.claudeFn(mapCtx, prompt)
+					mu.Lock()
+					defer mu.Unlock()
+					if err != nil && firstErr == nil {
+						firstErr = fmt.Errorf("map item %d: %w", idx+1, err)
+						mapCancel() // cancel remaining items on first error
+					}
+					results[idx] = result
+				}(j, item)
+			}
+			wg.Wait()
+			mapCancel() // ensure cancel is always called
+
+			if firstErr != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("executor: agent %q step %d (%s) map failed: %v — pipeline aborted", run.Name, i+1, step.Label, firstErr)
+				run.addIteration(IterationResult{
+					Iteration:  1,
+					StartedAt:  time.Now(),
+					FinishedAt: time.Now(),
+					Error:      fmt.Sprintf("pipeline step %d (%s): %v", i+1, step.Label, firstErr),
+				})
+				e.fireOnIteration(run.Name)
+				return
+			}
+			prevOutput = strings.Join(results, "\n\n---\n\n")
+			log.Printf("executor: agent %q step %d (%s) map complete (%d items)", run.Name, i+1, step.Label, len(items))
+
+		case StepKindLoop:
+			body := methods[step.LoopMethod]
+			// First iteration gets previous step output as context.
+			// Subsequent iterations use just the method body (plus steering).
+			firstPrompt := body
+			if prevOutput != "" {
+				firstPrompt = prevOutput + "\n\n" + body
+			}
+			log.Printf("executor: agent %q entering loop step %d/%d (%s)", run.Name, i+1, len(p.Steps), step.Label)
+			e.runAgentLoop(ctx, run, firstPrompt, body)
+			return // loop never finishes normally
+		}
+	}
+
+	// Pipeline completed with no loop step (all simple/map).
+	log.Printf("executor: agent %q pipeline complete (no loop step)", run.Name)
+}
+
+// runAgentLoop is the inner loop for a loop step. It calls claude repeatedly
+// with the prompt, handling steering injection between iterations.
+//
+// On the first iteration, firstPrompt is used (may include context from
+// previous pipeline steps). On subsequent iterations, basePrompt is used
+// (just the loop method body, plus any steering messages).
+//
+// This is also the execution path for legacy single-method agents where
+// firstPrompt == basePrompt.
+func (e *Executor) runAgentLoop(ctx context.Context, run *AgentRun, firstPrompt string, basePrompt string) {
 	iteration := 0
 	for {
 		iteration++
@@ -270,12 +442,16 @@ func (e *Executor) runAgent(ctx context.Context, run *AgentRun, prompt string) {
 		default:
 		}
 
+		iterPrompt := basePrompt
+		if iteration == 1 {
+			iterPrompt = firstPrompt
+		}
+
 		// Drain any injected steering messages and prepend them to the prompt
 		// for this iteration. This allows steer clients to influence the agent's
 		// next action without restarting it.
-		iterPrompt := prompt
 		var injected []string
-		drain:
+	drain:
 		for {
 			select {
 			case msg := <-run.injectCh:
@@ -535,4 +711,100 @@ func (e *Executor) StartPending(agentMethods map[string]map[string]string) {
 			log.Printf("executor: failed to start agent %q: %v", obj.Name, err)
 		}
 	}
+}
+
+// splitItems splits text into items using heuristics:
+// tries numbered lists, markdown headings, bullet points, then paragraphs.
+// This is a copy of the logic from runtime/runtime.go, duplicated here
+// because the executor must not import the runtime package (which depends
+// on the pipeline and registry packages).
+func splitItems(text string) []string {
+	lines := strings.Split(text, "\n")
+
+	// Try numbered list (e.g., "1. ", "2. ")
+	var numbered []string
+	var current strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) > 2 && trimmed[0] >= '1' && trimmed[0] <= '9' &&
+			(strings.HasPrefix(trimmed[1:], ". ") ||
+				(len(trimmed) > 3 && trimmed[1] >= '0' && trimmed[1] <= '9' && strings.HasPrefix(trimmed[2:], ". "))) {
+			if current.Len() > 0 {
+				numbered = append(numbered, strings.TrimSpace(current.String()))
+				current.Reset()
+			}
+			current.WriteString(trimmed)
+		} else if current.Len() > 0 {
+			current.WriteString("\n" + trimmed)
+		}
+	}
+	if current.Len() > 0 {
+		numbered = append(numbered, strings.TrimSpace(current.String()))
+	}
+	if len(numbered) >= 2 {
+		return numbered
+	}
+
+	// Try markdown headings (## or #)
+	var headingSections []string
+	current.Reset()
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			if current.Len() > 0 {
+				headingSections = append(headingSections, strings.TrimSpace(current.String()))
+				current.Reset()
+			}
+			current.WriteString(trimmed)
+		} else if current.Len() > 0 {
+			current.WriteString("\n" + line)
+		}
+	}
+	if current.Len() > 0 {
+		headingSections = append(headingSections, strings.TrimSpace(current.String()))
+	}
+	if len(headingSections) >= 2 {
+		return headingSections
+	}
+
+	// Try bullet points (- or *)
+	var bullets []string
+	current.Reset()
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			if current.Len() > 0 {
+				bullets = append(bullets, strings.TrimSpace(current.String()))
+				current.Reset()
+			}
+			current.WriteString(trimmed)
+		} else if current.Len() > 0 && trimmed != "" {
+			current.WriteString("\n" + trimmed)
+		}
+	}
+	if current.Len() > 0 {
+		bullets = append(bullets, strings.TrimSpace(current.String()))
+	}
+	if len(bullets) >= 2 {
+		return bullets
+	}
+
+	// Fallback: split on double newlines (paragraphs)
+	paragraphs := strings.Split(text, "\n\n")
+	var result []string
+	for _, p := range paragraphs {
+		t := strings.TrimSpace(p)
+		if t != "" {
+			result = append(result, t)
+		}
+	}
+	if len(result) >= 2 {
+		return result
+	}
+
+	// Last resort: return the whole thing as one item
+	if t := strings.TrimSpace(text); t != "" {
+		return []string{t}
+	}
+	return nil
 }
