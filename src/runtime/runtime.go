@@ -172,13 +172,18 @@ func ExecutePipeline(ctx context.Context, p *pipeline.Pipeline, args map[string]
 }
 
 // claudeCmd builds the base claude command with flags that:
-// - prevent project context (AGENT.md) from leaking via --system-prompt ""
+// - set a system prompt with the working directory so Claude's file tools
+//   operate in the correct location (not the git root)
 // - bypass all permission checks so tools (file read/write) execute without prompting
 //
 // The command is bound to ctx: if ctx is cancelled, the entire process group
 // is killed so no orphaned claude (or its children) survive.
 func claudeCmd(ctx context.Context, extraArgs ...string) *exec.Cmd {
-	args := []string{"-p", "--system-prompt", "", "--dangerously-skip-permissions"}
+	sysprompt := ""
+	if wd, err := os.Getwd(); err == nil {
+		sysprompt = fmt.Sprintf("Your working directory is %s. All file operations should use this directory, not the git repository root.", wd)
+	}
+	args := []string{"-p", "--system-prompt", sysprompt, "--dangerously-skip-permissions"}
 	if m := os.Getenv("MODEL"); m != "" {
 		args = append(args, "--model", m)
 	} else {

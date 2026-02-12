@@ -318,10 +318,22 @@ What have we unlocked now?
 
 ## Deploying new agents - adding a supervisor for another agent.
 
+But what about supervising those loops with Claude also? 
+
+The core point of AI design is asking what can be automated and what is the reliability?
+
+When something becomes reliable enough, we move up a level of the stack.
+
+We measure reliability using evals. But outside of this - can we use AI itself to help? 
+
+This I call supervision. Early on in Ralphing, I realised I could use Claude to supervise a Ralph loop.
+
+`supervise(loop, supervisor-agent)` runs a loop and allows supervisor-agent the ability to read the loop's logs for iterations. The supervisor agent runs in a separate thread and can interact with the loop by steering it, through temporarily modifying the looped prompt.
+
 ```yaml
 # agents-team.p
 agent-builder:
-    supervise(loop(build), build-supervisor)
+    supervise(loop(build), agent(build-supervisor))
 
 build-supervisor:
 	Your job is to supervise a build agent. Make notes if it gets stuck or falls into a loop and doesn't do productive things.
@@ -333,6 +345,31 @@ agent-release-manager:
     loop(releasemgmt)
 ```
 
+What if agents get 100x more powerful? What if we only need one supervisor? 
+
+```yaml
+# agents-team.p
+agent-builder:
+    loop(build)
+
+agent-bugfixer:
+    loop(bugfix)
+
+agent-release-manager:
+    loop(releasemgmt)
+
+supervisor:
+	supervise(agent-builder, agent-bugfixer, agent-release-manager)
+```
+
+The beauty of declarative languages is that this can be live applied without killing the existing agents setup.
+
+
+
+
+
+
+---
 
 What's next?
 
@@ -341,11 +378,5 @@ What's next?
  - agent autoscaling based on performance.
  - track agents creating subagents. 
  - allow agents cross-communication with each other.
-
-
-
----
-
-But what about supervising those loops with Claude also? 
 
 TBC

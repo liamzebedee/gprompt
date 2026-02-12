@@ -1,5 +1,0 @@
-# Bug Backlog
-
-## Open
-
-## Fixed

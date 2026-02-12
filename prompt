@@ -1,0 +1,14 @@
+the general tree/content panes don't do what I want them to do
+
+desired behaviour:
+    the cluster starts up
+    we call apply, it starts agents which each are loops
+    from that moment forward - the steering ui should show iteration 1 of every agent's loop in the tree as it is working at that moment
+    on the right, each pane should show the live convo thread of claude running in that iteration loop. ALL messags, incl tool uses, etc.
+
+current behaviour:
+    start up cluster, call apply
+    go to steer UI
+    there are no iterations shown
+    only when an iteration is completeted is it added to the UI
+    and only then we can only see the final message, not the full convo chain for that iteration

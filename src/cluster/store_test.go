@@ -254,7 +254,8 @@ func TestLoadState(t *testing.T) {
 	if agent == nil {
 		t.Fatal("expected restored agent")
 	}
-	if agent.State != RunStateStopped {
-		t.Fatalf("expected stopped state, got %s", agent.State)
+	// LoadState resets all agents to pending — run state is runtime-only.
+	if agent.State != RunStatePending {
+		t.Fatalf("expected pending state after load, got %s", agent.State)
 	}
 }

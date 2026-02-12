@@ -554,12 +554,12 @@ func (m TUIModel) View() string {
 		return "Initializing..."
 	}
 
-	if !m.ready {
-		return m.centeredMessage("Connecting to master...")
-	}
-
 	if m.errText != "" && !m.ready {
 		return m.centeredMessage(fmt.Sprintf("Error: %s", m.errText))
+	}
+
+	if !m.ready {
+		return m.centeredMessage("Connecting to master...")
 	}
 
 	// Layout: left pane (40%) | right pane (60%)

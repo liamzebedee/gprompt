@@ -630,6 +630,32 @@ func containsStr(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
+// TestTUIErrorDisplayBeforeReady verifies that when errText is set before
+// the TUI has received its first state update (ready=false), the error
+// message is displayed instead of the generic "Connecting to master..." text.
+// This is a regression test for BUG-001: unreachable error display code.
+func TestTUIErrorDisplayBeforeReady(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.width = 80
+	m.height = 24
+
+	// Before ready, with no error: should show "Connecting to master..."
+	view := m.View()
+	if !containsStr(view, "Connecting to master") {
+		t.Errorf("expected 'Connecting to master...' when not ready and no error, got %q", view)
+	}
+
+	// Before ready, WITH an error: should show the error, NOT "Connecting to master..."
+	m.errText = "connection refused"
+	view = m.View()
+	if !containsStr(view, "connection refused") {
+		t.Errorf("expected error text 'connection refused' to be displayed when not ready, got %q", view)
+	}
+	if containsStr(view, "Connecting to master") {
+		t.Errorf("should NOT show 'Connecting to master' when there is an error, got %q", view)
+	}
+}
+
 func TestMeanStddev(t *testing.T) {
 	mean, stddev := meanStddev([]float64{10, 20, 30})
 	if mean != 20 {

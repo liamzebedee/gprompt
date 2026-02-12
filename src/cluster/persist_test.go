@@ -41,8 +41,9 @@ func TestSaveAndLoadState(t *testing.T) {
 	if alpha == nil {
 		t.Fatal("expected alpha to exist after load")
 	}
-	if alpha.State != RunStateRunning {
-		t.Fatalf("expected alpha running, got %s", alpha.State)
+	// Run state is not persisted — all agents load as pending.
+	if alpha.State != RunStatePending {
+		t.Fatalf("expected alpha pending after load, got %s", alpha.State)
 	}
 	if alpha.ID != "id-a" {
 		t.Fatalf("expected alpha ID id-a, got %s", alpha.ID)

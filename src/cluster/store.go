@@ -100,6 +100,7 @@ func (s *Store) ApplyDefinitions(defs []AgentDef) ApplySummary {
 		}
 		existing.ID = def.ID
 		existing.Definition = def.Definition
+		existing.State = RunStatePending
 		existing.Revisions = append(existing.Revisions, rev)
 		existing.CurrentRevision = def.ID
 		summary.Updated = append(summary.Updated, def.Name)
@@ -160,7 +161,9 @@ func (s *Store) SetRunState(name string, state RunState) bool {
 }
 
 // LoadState replaces the entire store contents. Used for loading
-// persisted state on startup.
+// persisted state on startup. Run state is not persisted — it's a
+// runtime concept owned by the executor. All loaded agents start
+// as pending; they come alive when apply triggers StartPending.
 func (s *Store) LoadState(objects []ClusterObject) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,6 +171,7 @@ func (s *Store) LoadState(objects []ClusterObject) {
 	s.objects = make(map[string]*ClusterObject, len(objects))
 	for i := range objects {
 		obj := objects[i]
+		obj.State = RunStatePending
 		s.objects[obj.Name] = &obj
 	}
 }

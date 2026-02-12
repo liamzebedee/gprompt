@@ -219,11 +219,14 @@ func TestExecutorStartPending(t *testing.T) {
 	store := NewStore()
 	seedAgent(store, "alpha")
 	seedAgent(store, "beta")
-	// Set beta to running manually to simulate already-running.
-	store.SetRunState("beta", RunStateRunning)
 
 	exec := NewExecutor(store, fakeClaude(20*time.Millisecond))
 	defer exec.StopAll(2 * time.Second)
+
+	// Start beta first so it's actually running in the executor.
+	if err := exec.Start("beta", map[string]string{"work": "do beta work"}); err != nil {
+		t.Fatalf("Start beta: %v", err)
+	}
 
 	agentMethods := map[string]map[string]string{
 		"alpha": {"work": "do alpha work"},
@@ -232,14 +235,13 @@ func TestExecutorStartPending(t *testing.T) {
 
 	exec.StartPending(agentMethods)
 
-	// Only alpha should have been started (it was pending).
+	// Alpha was pending — should have been started.
 	if !exec.IsRunning("alpha") {
 		t.Fatal("expected alpha to be running")
 	}
-	// beta was already running in the store but not in executor,
-	// so StartPending should not have tried to start it (its state is running, not pending).
-	if exec.IsRunning("beta") {
-		t.Fatal("expected beta NOT to be started by StartPending (state was running)")
+	// Beta was already running in the executor — Start is a no-op.
+	if !exec.IsRunning("beta") {
+		t.Fatal("expected beta to still be running")
 	}
 }
 
