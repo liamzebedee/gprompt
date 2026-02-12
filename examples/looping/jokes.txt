@@ -39,3 +39,15 @@ Who's there?
 Atch.
 Atch who?
 Bless you! 🤧
+
+Knock knock!
+Who's there?
+Recursion.
+Recursion who?
+Knock knock! 🔁
+
+Knock knock!
+Who's there?
+TCP.
+TCP who?
+I'll keep knocking until you acknowledge me! 📡

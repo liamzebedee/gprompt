@@ -276,12 +276,13 @@ Honestly, we might just end up subsuming all of these roles, since the model wil
 But over time, we will still want to direct models using English and treat them as an engineering system.
 Maybe we will let agents intelligently design themselves?!
 
+
+
 agent(founder-pm)
 agent(marketing)
 agent(loop(changelog-and-releases))
 agent(loop(bugfix))
 agent(loop(build-review-test-merge))
-
 
 founder-pm:
 	Read user feedback. Store in folder.

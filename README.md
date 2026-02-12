@@ -172,8 +172,28 @@ While I was learning ralph, I started building another ralph loop for bugfixing.
 
 Still, you can do that with `./loop.sh bugfix` and `./loop.sh build`
 
-But what about supervising those loops with Claude also? What about UI's that show you what's going on here?
+But what if you didn't have to?
+
+## Autoscaled agents
+
+```
+agent1:
+	loop(build)
+
+agent2:
+	loop(bugfix)
+```
+
+`gprompt apply agents.p`
 
 ---
+
+But what about supervising those loops with Claude also? 
+
+What about UI's that show you what's going on here?
+
+What about autoscaling agents to match workloads?
+
+What about A/B testing prompts?
 
 TBC
