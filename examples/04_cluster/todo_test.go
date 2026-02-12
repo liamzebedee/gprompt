@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func tempStore(t *testing.T) *Store {
@@ -2025,6 +2026,67 @@ func TestExportImportRoundTripPreservesTags(t *testing.T) {
 	}
 	if s2.Items[0].Tags[0] != "work" || s2.Items[0].Tags[1] != "urgent" {
 		t.Errorf("expected [work urgent], got %v", s2.Items[0].Tags)
+	}
+}
+
+func TestImportPreservesTimestamps(t *testing.T) {
+	s := tempStore(t)
+
+	csvData := `id,title,status,priority,due_date,tags,created_at,updated_at
+1,Old task,pending,,,work,2023-06-15T10:30:00Z,2023-07-20T14:45:00Z
+`
+	count, err := s.Import(strings.NewReader(csvData))
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 imported, got %d", count)
+	}
+
+	item := s.Items[0]
+	expectedCreated := "2023-06-15T10:30:00Z"
+	expectedUpdated := "2023-07-20T14:45:00Z"
+
+	gotCreated := item.CreatedAt.Format("2006-01-02T15:04:05Z")
+	gotUpdated := item.UpdatedAt.Format("2006-01-02T15:04:05Z")
+
+	if gotCreated != expectedCreated {
+		t.Errorf("expected created_at %q, got %q", expectedCreated, gotCreated)
+	}
+	if gotUpdated != expectedUpdated {
+		t.Errorf("expected updated_at %q, got %q", expectedUpdated, gotUpdated)
+	}
+}
+
+func TestImportRoundTripPreservesTimestamps(t *testing.T) {
+	s1 := tempStore(t)
+	item1, _ := s1.Add("Task with timestamp")
+
+	var buf bytes.Buffer
+	if err := s1.Export(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait to ensure time.Now() in Import would differ from original timestamps.
+	time.Sleep(2 * time.Second)
+
+	s2 := tempStore(t)
+	_, err := s2.Import(&buf)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	// After export→import round-trip, timestamps should be preserved (to RFC3339 precision).
+	origCreated := item1.CreatedAt.Format(time.RFC3339)
+	gotCreated := s2.Items[0].CreatedAt.Format(time.RFC3339)
+	if origCreated != gotCreated {
+		t.Errorf("created_at not preserved: original %v, imported %v", origCreated, gotCreated)
+	}
+
+	origUpdated := item1.UpdatedAt.Format(time.RFC3339)
+	gotUpdated := s2.Items[0].UpdatedAt.Format(time.RFC3339)
+	if origUpdated != gotUpdated {
+		t.Errorf("updated_at not preserved: original %v, imported %v", origUpdated, gotUpdated)
 	}
 }
 

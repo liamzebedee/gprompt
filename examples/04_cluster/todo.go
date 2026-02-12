@@ -681,7 +681,21 @@ func (s *Store) Import(r io.Reader) (int, error) {
 			tags = strings.Split(tagsStr, ";")
 		}
 
+		// Parse timestamps from CSV; fall back to now if missing or invalid.
 		now := time.Now()
+		createdAt := now
+		if ts := strings.TrimSpace(record[6]); ts != "" {
+			if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+				createdAt = parsed
+			}
+		}
+		updatedAt := now
+		if ts := strings.TrimSpace(record[7]); ts != "" {
+			if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+				updatedAt = parsed
+			}
+		}
+
 		item := Item{
 			ID:        s.nextID(),
 			Title:     title,
@@ -689,14 +703,44 @@ func (s *Store) Import(r io.Reader) (int, error) {
 			Priority:  priority,
 			DueDate:   due,
 			Tags:      normaliseTags(tags),
-			CreatedAt: now,
-			UpdatedAt: now,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
 		}
 		s.Items = append(s.Items, item)
 		count++
 	}
 
 	return count, nil
+}
+
+// Overdue returns all non-done items whose due date is before today.
+func (s *Store) Overdue() []Item {
+	today := time.Now().Truncate(24 * time.Hour)
+	var result []Item
+	for _, item := range s.Items {
+		if item.Status != StatusDone && item.DueDate.Valid && item.DueDate.Time.Truncate(24*time.Hour).Before(today) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// Upcoming returns all non-done items whose due date is today or within the next `days` days.
+// Items with no due date are excluded. A days value of 0 means today only.
+func (s *Store) Upcoming(days int) []Item {
+	today := time.Now().Truncate(24 * time.Hour)
+	horizon := today.AddDate(0, 0, days)
+	var result []Item
+	for _, item := range s.Items {
+		if item.Status == StatusDone || !item.DueDate.Valid {
+			continue
+		}
+		due := item.DueDate.Time.Truncate(24 * time.Hour)
+		if (due.Equal(today) || due.After(today)) && (due.Equal(horizon) || due.Before(horizon)) {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.

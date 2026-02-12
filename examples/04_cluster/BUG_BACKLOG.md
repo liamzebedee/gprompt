@@ -20,3 +20,4 @@
 - [x] `todo add` with multi-word title requires quoting — should join all remaining args
 - [x] `AddFull`/`AddWithPriority` accept invalid priority values — should reject with error like `SetPriority` does
 - [x] Tags containing semicolons corrupt CSV export/import round-trip — semicolons are used as tag separator in CSV but not rejected as tag content
+- [x] `Import` discards `created_at`/`updated_at` timestamps from CSV — always uses `time.Now()`, so export→import round-trip loses original timestamps
