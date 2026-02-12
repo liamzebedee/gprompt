@@ -1,10 +1,10 @@
-# nyt.p
-# goal: run a tiny “NYT” as a living system:
-# - gather info
-# - draft articles in parallel
-# - edit
-# - publish
-# - repeat forever
+; nyt.p
+; # goal: run a tiny “NYT” as a living system:
+; # - gather info
+; # - draft articles in parallel
+; # - edit
+; # - publish
+; # - repeat forever
 
 nyt:
 	loop(30m):

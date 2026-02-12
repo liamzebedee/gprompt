@@ -5,32 +5,42 @@ It's time to implement agents.
 Everything below will form part of a Kubernetes-like architecture.
 
 term 1
-`gprompt steer agents.p`
+`gcluster steer agents.p`
 
 term 2
-`gprompt steer agents.p`
+`gcluster steer agents.p`
 
 term 3
-`gprompt steer agents.p`
+`gcluster steer agents.p`
 
 each terminal you can kinda switch between agents usnig the tree pane on the left
 
 The terminals don't actually start agents themselves. They connect to the control plane run by `gcluster`
 
 ```
-gcluster
-gprompt apply agents.p
+gcluster cluster
+gcluster apply agents.p
 ``` 
+
+The cluster is run by default on 127.0.0.1:43252 and gprompt connects to this address by default.
 
 Like Kubernetes, everything is declarative.
 
 `agents.p` describes the desired set of agents.
 
-`gprompt apply agents.p` sends these agent definitions to the cluster and applies them as real objects with stable IDs.
+`gcluster apply agents.p` sends these agent definitions to the cluster and applies them as real objects with stable IDs.
 
 If `agents.p` changes later, applying again creates a new revision. Existing runs still refer to the old revision.
 
-`gprompt steer` shows the current cluster state and lets you attach to and steer agents within it. The source of truth is gcluster, not the local file.
+`gcluster steer <file.p>` shows the current cluster state and lets you attach to and steer agents within it. The source of truth is gcluster, not the local file.
+
+### Stable ID's.
+
+P language syntax is defined in the [language spec](/docs/p-lang-spec.md) and is parsed and evaluated into a stable S-Expression (Lisp). 
+
+Hashing this S-Expression forms the basis of stable ID's. 
+
+`gcluster cluster` stores the agent definitions as real cluster objects, with stable IDs and revision history. If agents.p changes later, applying again creates new revisions. Old runs stay attached to the old revision
 
 
 ## UX.

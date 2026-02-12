@@ -41,14 +41,27 @@
     "body-line": {
       "begin": "^\\t",
       "end": "$",
-      "name": "string.unquoted.body.p",
+      "name": "meta.body.p",
       "patterns": [
         { "include": "#labeled-step" },
         { "include": "#pipeline-step" },
         { "include": "#pipeline" },
         { "include": "#param-interpolation" },
         { "include": "#loop-construct" },
-        { "include": "#map-construct" }
+        { "include": "#map-construct" },
+        { "include": "#body-markdown-heading" }
+      ]
+    },
+
+    "body-markdown-heading": {
+      "begin": "#{1,6}\\s+",
+      "end": "$",
+      "beginCaptures": {
+        "0": { "name": "markup.heading.p" }
+      },
+      "name": "markup.heading.p",
+      "patterns": [
+        { "include": "#param-interpolation" }
       ]
     },
 
