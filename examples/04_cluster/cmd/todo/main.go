@@ -21,6 +21,7 @@ Commands:
   edit <id> <title>   Rename an item
   search <query>      Search items by title substring
   stats               Show counts by status
+  export              Output all items as CSV
   help                Show this message
 `)
 	os.Exit(1)
@@ -58,7 +59,11 @@ func main() {
 		if len(os.Args) >= 3 {
 			filter = todo.Status(os.Args[2])
 		}
-		items := store.List(filter)
+		items, err := store.List(filter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		if len(items) == 0 {
 			fmt.Println("No items.")
 			return

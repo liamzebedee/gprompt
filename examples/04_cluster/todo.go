@@ -1,9 +1,12 @@
 package todo
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -153,9 +156,48 @@ func ParseAddTitle(args []string) string {
 	return strings.Join(args, " ")
 }
 
-func (s *Store) List(filter Status) []Item {
+// ValidStatus reports whether s is one of the recognised status values.
+func ValidStatus(s Status) bool {
+	switch s {
+	case StatusPending, StatusInProgress, StatusDone:
+		return true
+	}
+	return false
+}
+
+// Export writes all items as CSV to the given writer.
+// Columns: id, title, status, created_at, updated_at.
+func (s *Store) Export(w io.Writer) error {
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+
+	// Header row
+	if err := cw.Write([]string{"id", "title", "status", "created_at", "updated_at"}); err != nil {
+		return err
+	}
+
+	for _, item := range s.Items {
+		record := []string{
+			strconv.Itoa(item.ID),
+			item.Title,
+			string(item.Status),
+			item.CreatedAt.Format(time.RFC3339),
+			item.UpdatedAt.Format(time.RFC3339),
+		}
+		if err := cw.Write(record); err != nil {
+			return err
+		}
+	}
+
+	return cw.Error()
+}
+
+func (s *Store) List(filter Status) ([]Item, error) {
 	if filter == "" {
-		return s.Items
+		return s.Items, nil
+	}
+	if !ValidStatus(filter) {
+		return nil, fmt.Errorf("invalid status filter: %q (valid values: pending, in_progress, done)", filter)
 	}
 	var result []Item
 	for _, item := range s.Items {
@@ -163,5 +205,5 @@ func (s *Store) List(filter Status) []Item {
 			result = append(result, item)
 		}
 	}
-	return result
+	return result, nil
 }

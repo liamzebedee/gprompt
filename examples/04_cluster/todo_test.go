@@ -26,7 +26,10 @@ func TestAddAndList(t *testing.T) {
 	s.Add("Write tests")
 	s.Add("Ship feature")
 
-	items := s.List("")
+	items, err := s.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -78,12 +81,18 @@ func TestListFilter(t *testing.T) {
 	done := s.Add("Done task")
 	s.SetStatus(done.ID, StatusDone)
 
-	pending := s.List(StatusPending)
+	pending, err := s.List(StatusPending)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(pending) != 1 {
 		t.Errorf("expected 1 pending, got %d", len(pending))
 	}
 
-	doneItems := s.List(StatusDone)
+	doneItems, err := s.List(StatusDone)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(doneItems) != 1 {
 		t.Errorf("expected 1 done, got %d", len(doneItems))
 	}
@@ -227,6 +236,57 @@ func TestParseAddTitleUsedWithAdd(t *testing.T) {
 
 	if item.Title != "Buy some milk" {
 		t.Errorf("expected title 'Buy some milk', got %q", item.Title)
+	}
+}
+
+func TestValidStatus(t *testing.T) {
+	valid := []Status{StatusPending, StatusInProgress, StatusDone}
+	for _, s := range valid {
+		if !ValidStatus(s) {
+			t.Errorf("expected %q to be valid", s)
+		}
+	}
+
+	invalid := []Status{"foo", "bar", "completed", ""}
+	for _, s := range invalid {
+		if ValidStatus(s) {
+			t.Errorf("expected %q to be invalid", s)
+		}
+	}
+}
+
+func TestListInvalidFilter(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Task A")
+
+	_, err := s.List(Status("bogus"))
+	if err == nil {
+		t.Fatal("expected error for invalid status filter, got nil")
+	}
+}
+
+func TestListValidFilter(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Task A")
+	done := s.Add("Task B")
+	s.SetStatus(done.ID, StatusDone)
+
+	// Empty filter returns all
+	all, err := s.List("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("expected 2 items, got %d", len(all))
+	}
+
+	// Valid filter returns matching
+	pending, err := s.List(StatusPending)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Errorf("expected 1 pending, got %d", len(pending))
 	}
 }
 
