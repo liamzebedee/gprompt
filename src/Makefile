@@ -1,12 +1,11 @@
-all: bin/gprompt bin/geval
+CMDS := gprompt geval gcluster
+BINS := $(addprefix bin/,$(CMDS))
 
-bin/gprompt: gprompt.go $(wildcard *//*.go)
-	@mkdir -p bin
-	go build -o bin/gprompt .
+all: $(BINS)
 
-bin/geval: cmd/geval/main.go $(wildcard *//*.go)
+bin/%: cmd/%/main.go $(wildcard *//*.go)
 	@mkdir -p bin
-	go build -o bin/geval ./cmd/geval
+	go build -o $@ ./cmd/$*
 
 clean:
 	rm -rf bin/

@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +10,8 @@ import (
 	"p2p/parser"
 	"p2p/registry"
 	"p2p/runtime"
+	"p2p/stdlib"
 )
-
-//go:embed stdlib.p
-var stdlibSource string
 
 func main() {
 	args := os.Args[1:]
@@ -160,7 +157,7 @@ func loadStdlib(reg *registry.Registry, inputFile string) {
 
 	// Fallback: embedded stdlib
 	debug.Log("stdlib not found on disk, using embedded")
-	nodes, err := parser.ParseString(stdlibSource)
+	nodes, err := parser.ParseString(stdlib.Source)
 	if err != nil {
 		debug.Log("embedded stdlib parse error: %v", err)
 		return

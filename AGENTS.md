@@ -4,20 +4,24 @@
 
 ```
 /home/liam/Music/p2p/
-├── AGENT.md                  # Architecture documentation (this file)
+├── AGENTS.md                 # Architecture documentation (this file)
 ├── spec.md                   # Original spec
 ├── spec2.md                  # Language specification
 └── src/                      # Everything lives here
     ├── go.mod                # Go module definition (module root)
     ├── Makefile              # Build system
-    ├── gprompt.go            # Main entry point (package main)
-    ├── stdlib.p              # Standard library methods
+    ├── stdlib/               # Shared embedded stdlib
+    │   ├── stdlib.go         # Exports stdlib.Source
+    │   └── stdlib.p          # Standard library methods
     ├── parser/parser.go      # AST parser with file imports
     ├── compiler/compiler.go  # Compilation logic
     ├── runtime/runtime.go    # Execution runtime
     ├── registry/registry.go  # Method registry
-    └── bin/
-        └── gprompt           # Compiled binary (after build)
+    ├── cmd/
+    │   ├── gprompt/main.go   # Prompt interpreter
+    │   ├── geval/main.go     # S-expression evaluator
+    │   └── gcluster/main.go  # Cluster management (apply, run, steer)
+    └── bin/                  # Compiled binaries (after build)
 ```
 
 ## Implementation Details
@@ -29,10 +33,11 @@
 - **runtime/**: Executes via `claude` CLI with implicit context passing
 
 ### Build System
-- `cd src && make` - Compiles to `src/bin/gprompt`
-- `cd src && make clean` - Removes binary
+- `cd src && make` - Compiles all commands to `src/bin/`
+- `cd src && make clean` - Removes binaries
+- All commands live in `src/cmd/<name>/main.go` and build to `src/bin/<name>`
 - Go module: `p2p` (go.mod is in `src/`)
-- Imports: `p2p/parser`, `p2p/compiler`, `p2p/registry`, `p2p/runtime`
+- Imports: `p2p/parser`, `p2p/compiler`, `p2p/registry`, `p2p/runtime`, `p2p/stdlib`
 
 ## Language Features Implemented
 
@@ -97,7 +102,7 @@ make
 
 ## Known Limitations
 
-- stdlib.p is searched relative to the input file's directory, CWD, and binary location
+- stdlib.p is embedded via `p2p/stdlib` package; also searched on disk relative to input file, CWD, and binary location
 - Requires `claude` CLI to be available in PATH
 - No error recovery - first error stops execution
 
