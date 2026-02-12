@@ -144,6 +144,24 @@ func TestParseBook(t *testing.T) {
 	t.Error("book method not found")
 }
 
+func TestParseSemicolonComments(t *testing.T) {
+	input := "; this is a comment\nhello world\n; another comment\n@foo\n"
+	nodes, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d: %+v", len(nodes), nodes)
+	}
+	if nodes[0].Type != NodePlainText || nodes[0].Text != "hello world" {
+		t.Errorf("expected plain text 'hello world', got %+v", nodes[0])
+	}
+	if nodes[1].Type != NodeInvocation || nodes[1].Name != "foo" {
+		t.Errorf("expected invocation 'foo', got %+v", nodes[1])
+	}
+}
+
 func TestParsePipeline(t *testing.T) {
 	input := "mypipe(x):\n\tx -> step1 (foo) -> step2 (bar)\n"
 	nodes, err := ParseString(input)

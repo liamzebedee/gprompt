@@ -29,6 +29,6 @@ cd src && make clean    # Removes binaries
 ## Notes
 
 - Use `cd src && make all` instead of `go build`
-
+- Always run `cd src && make all` at the end of completing a task so binaries are up to date
 - stdlib.p is embedded
 - Requires `claude` CLI in PATH

@@ -44,7 +44,7 @@ func ParseString(content string) ([]Node, error) {
 		trimmed := strings.TrimSpace(line)
 
 		// Skip empty lines and comments
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
 			i++
 			continue
 		}
