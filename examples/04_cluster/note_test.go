@@ -122,6 +122,38 @@ func splitLines(s string) []string {
 	return lines
 }
 
+func TestSetNoteWhitespaceOnly(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "todos.json"))
+	item, _ := s.Add("Task")
+
+	// Setting a whitespace-only note should be treated the same as clearing
+	// the note — it contains no useful content, just like whitespace-only
+	// titles are rejected by Add/Edit.
+	for _, ws := range []string{"   ", "\t", " \t\n "} {
+		if err := s.SetNote(item.ID, ws); err != nil {
+			t.Fatalf("SetNote(%q): unexpected error: %v", ws, err)
+		}
+		got, _ := s.Get(item.ID)
+		if got.Note != "" {
+			t.Errorf("SetNote(%q): expected note to be cleared (empty), got %q", ws, got.Note)
+		}
+	}
+}
+
+func TestSetNoteTrimsWhitespace(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "todos.json"))
+	item, _ := s.Add("Task")
+
+	// Notes with leading/trailing whitespace should be trimmed.
+	if err := s.SetNote(item.ID, "  hello world  "); err != nil {
+		t.Fatalf("SetNote: %v", err)
+	}
+	got, _ := s.Get(item.ID)
+	if got.Note != "hello world" {
+		t.Errorf("expected trimmed note %q, got %q", "hello world", got.Note)
+	}
+}
+
 func TestNoteUndoRestore(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "todos.json")

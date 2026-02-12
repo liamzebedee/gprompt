@@ -328,6 +328,7 @@ func (s *Store) Edit(id int, newTitle string) error {
 // SetNote sets or clears the note on an existing item.
 // Pass an empty string to clear the note.
 func (s *Store) SetNote(id int, note string) error {
+	note = strings.TrimSpace(note)
 	item, err := s.Get(id)
 	if err != nil {
 		return err
@@ -968,6 +969,100 @@ func (s *Store) Duplicate(id int) (Item, error) {
 	}
 	s.Items = append(s.Items, item)
 	return item, nil
+}
+
+// TimelineBucket represents a group of items in the timeline view.
+type TimelineBucket struct {
+	Label string
+	Items []Item
+}
+
+// Timeline groups non-done items by due-date urgency and returns them as
+// ordered buckets: Overdue, Today, This Week (2–7 days), Later, and No Due Date.
+// Done items are excluded from the timeline.
+func (s *Store) Timeline() []TimelineBucket {
+	today := time.Now().Truncate(24 * time.Hour)
+	weekEnd := today.AddDate(0, 0, 7)
+
+	var overdue, todayItems, thisWeek, later, noDue []Item
+	for _, item := range s.Items {
+		if item.Status == StatusDone {
+			continue
+		}
+		if !item.DueDate.Valid {
+			noDue = append(noDue, item)
+			continue
+		}
+		due := item.DueDate.Time.Truncate(24 * time.Hour)
+		switch {
+		case due.Before(today):
+			overdue = append(overdue, item)
+		case due.Equal(today):
+			todayItems = append(todayItems, item)
+		case due.Before(weekEnd) || due.Equal(weekEnd):
+			thisWeek = append(thisWeek, item)
+		default:
+			later = append(later, item)
+		}
+	}
+
+	var buckets []TimelineBucket
+	if len(overdue) > 0 {
+		buckets = append(buckets, TimelineBucket{Label: "Overdue", Items: overdue})
+	}
+	if len(todayItems) > 0 {
+		buckets = append(buckets, TimelineBucket{Label: "Today", Items: todayItems})
+	}
+	if len(thisWeek) > 0 {
+		buckets = append(buckets, TimelineBucket{Label: "This Week", Items: thisWeek})
+	}
+	if len(later) > 0 {
+		buckets = append(buckets, TimelineBucket{Label: "Later", Items: later})
+	}
+	if len(noDue) > 0 {
+		buckets = append(buckets, TimelineBucket{Label: "No Due Date", Items: noDue})
+	}
+	return buckets
+}
+
+// TagGroup represents a group of items sharing a common tag.
+type TagGroup struct {
+	Tag   string
+	Items []Item
+}
+
+// GroupByTag returns items grouped by tag, sorted alphabetically by tag name.
+// Items with multiple tags appear in each relevant group. Items with no tags
+// are collected under a special group with an empty Tag at the end (if any exist).
+func (s *Store) GroupByTag() []TagGroup {
+	tagMap := map[string][]Item{}
+	var untagged []Item
+	for _, item := range s.Items {
+		if len(item.Tags) == 0 {
+			untagged = append(untagged, item)
+			continue
+		}
+		for _, tag := range item.Tags {
+			lower := strings.ToLower(tag)
+			tagMap[lower] = append(tagMap[lower], item)
+		}
+	}
+
+	// Collect tag names and sort alphabetically.
+	tagNames := make([]string, 0, len(tagMap))
+	for tag := range tagMap {
+		tagNames = append(tagNames, tag)
+	}
+	sort.Strings(tagNames)
+
+	groups := make([]TagGroup, 0, len(tagNames)+1)
+	for _, tag := range tagNames {
+		groups = append(groups, TagGroup{Tag: tag, Items: tagMap[tag]})
+	}
+	if len(untagged) > 0 {
+		groups = append(groups, TagGroup{Tag: "", Items: untagged})
+	}
+	return groups
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.

@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `SetNote` does not trim leading/trailing whitespace — whitespace-only notes are stored as non-empty instead of being treated as cleared, and notes with surrounding spaces keep the accidental whitespace (same class of bug as the `Add`/`Edit` whitespace trim fix)
+
 - [x] `Archive` produces nil `Items` slice when all items are archived — causes `Save` to write `"items": null`, which fails on subsequent `Load` (same class of bug as the `ClearDone` nil-slice fix)
 
 - [x] `Export`/`Import` CSV missing `note` column — export→import round-trip silently drops notes added via `SetNote`
