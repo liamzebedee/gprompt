@@ -1,4 +1,4 @@
-# gprompt Language Interpreter
+# project
 
 ## Specs
 
@@ -10,15 +10,6 @@ See `specs/` for detailed specifications:
 
 ```
 src/
-├── go.mod                # Go module `p2p` (module root)
-├── Makefile              # Build system
-├── stdlib/               # Shared embedded stdlib
-│   ├── stdlib.go         # Exports stdlib.Source
-│   └── stdlib.p          # Standard library methods
-├── parser/parser.go      # AST parser with file imports
-├── compiler/compiler.go  # Compilation logic
-├── runtime/runtime.go    # Execution runtime
-├── registry/registry.go  # Method registry
 ├── cmd/
 │   ├── gprompt/main.go   # Prompt interpreter
 │   ├── geval/main.go     # S-expression evaluator
@@ -34,20 +25,10 @@ cd src && make clean    # Removes binaries
 ```
 
 - All commands: `src/cmd/<name>/main.go` → `src/bin/<name>`
-- Imports: `p2p/parser`, `p2p/compiler`, `p2p/registry`, `p2p/runtime`, `p2p/stdlib`
-
-## Architecture
-
-**4-Stage Pipeline:** `.p file → Parser → Registry → Compiler → Runtime → Output`
-
-1. **Parse** — Convert .p file to AST, resolve `@file.p` imports
-2. **Register** — Load stdlib + custom method definitions
-3. **Compile** — Resolve `@method` calls, interpolate `[param]` placeholders
-4. **Execute** — Run compiled prompts via `claude` CLI with implicit context passing
 
 ## Notes
 
 - Use `cd src && make all` instead of `go build`
 
-- stdlib.p is embedded via `p2p/stdlib`; also searched on disk relative to input file, CWD, and binary location
+- stdlib.p is embedded
 - Requires `claude` CLI in PATH

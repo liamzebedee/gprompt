@@ -96,6 +96,7 @@ type TUIModel struct {
 	// Scroll offset for iteration detail view (long chat history).
 	// 0 = show from top. Increases as user scrolls down.
 	scrollOffset int
+	followTail   bool // auto-scroll to bottom on new content
 
 	// Terminal dimensions
 	width  int
@@ -127,6 +128,7 @@ func NewTUIModel(client *SteerClient) TUIModel {
 		searchInput: si,
 		msgInput:    mi,
 		promptInput: pi,
+		followTail:  true,
 		runs:        make(map[string]AgentRunSnapshot),
 		methods:     make(map[string]map[string]string),
 		pipelines:   make(map[string]*PipelineDef),
@@ -199,6 +201,9 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.ready = true
 		m.rebuildTree()
+		if m.followTail {
+			m.scrollOffset = 999999 // will be clamped to max in render
+		}
 		return m, m.waitForState()
 
 	case errMsg:
@@ -331,12 +336,14 @@ func (m *TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
-			m.scrollOffset = 0 // reset scroll when changing selection
+			m.scrollOffset = 0
+			m.followTail = true
 		}
 	case "down", "j":
 		if m.cursor < len(m.flatTree)-1 {
 			m.cursor++
 			m.scrollOffset = 0
+			m.followTail = true
 		}
 	case "pgdown":
 		m.scrollOffset += 10
@@ -345,6 +352,7 @@ func (m *TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.scrollOffset < 0 {
 			m.scrollOffset = 0
 		}
+		m.followTail = false
 	case "right", "l":
 		if m.cursor >= 0 && m.cursor < len(m.flatTree) {
 			node := m.flatTree[m.cursor]
@@ -439,23 +447,38 @@ func (m *TUIModel) rebuildTree() {
 				}
 
 				// Only loop steps show iteration children
-				if step.Kind == StepKindLoop && hasRun && len(run.Iterations) > 0 {
-					iters := run.Iterations
-					start := 0
-					if len(iters) > 4 {
-						start = len(iters) - 4
-					}
-					for i := len(iters) - 1; i >= start; i-- {
-						ir := iters[i]
-						iterNode := &TreeNode{
+				if step.Kind == StepKindLoop && hasRun {
+					// Show live iteration first if present
+					if run.LiveIter != nil {
+						liveNode := &TreeNode{
 							Kind:      NodeIteration,
-							Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+							Label:     fmt.Sprintf("iteration %d (live)", run.LiveIter.Iteration),
 							AgentName: obj.Name,
 							StepLabel: stepLabel,
-							Iteration: ir.Iteration,
+							Iteration: run.LiveIter.Iteration,
 							Depth:     2,
 						}
-						stepNode.Children = append(stepNode.Children, iterNode)
+						stepNode.Children = append(stepNode.Children, liveNode)
+					}
+
+					if len(run.Iterations) > 0 {
+						iters := run.Iterations
+						start := 0
+						if len(iters) > 4 {
+							start = len(iters) - 4
+						}
+						for i := len(iters) - 1; i >= start; i-- {
+							ir := iters[i]
+							iterNode := &TreeNode{
+								Kind:      NodeIteration,
+								Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+								AgentName: obj.Name,
+								StepLabel: stepLabel,
+								Iteration: ir.Iteration,
+								Depth:     2,
+							}
+							stepNode.Children = append(stepNode.Children, iterNode)
+						}
 					}
 				}
 
@@ -478,23 +501,38 @@ func (m *TUIModel) rebuildTree() {
 				Depth:     1,
 			}
 
-			if hasRun && len(run.Iterations) > 0 {
-				iters := run.Iterations
-				start := 0
-				if len(iters) > 4 {
-					start = len(iters) - 4
-				}
-				for i := len(iters) - 1; i >= start; i-- {
-					ir := iters[i]
-					iterNode := &TreeNode{
+			if hasRun {
+				// Show live iteration first if present
+				if run.LiveIter != nil {
+					liveNode := &TreeNode{
 						Kind:      NodeIteration,
-						Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+						Label:     fmt.Sprintf("iteration %d (live)", run.LiveIter.Iteration),
 						AgentName: obj.Name,
 						StepLabel: stepLabel,
-						Iteration: ir.Iteration,
+						Iteration: run.LiveIter.Iteration,
 						Depth:     2,
 					}
-					loopNode.Children = append(loopNode.Children, iterNode)
+					loopNode.Children = append(loopNode.Children, liveNode)
+				}
+
+				if len(run.Iterations) > 0 {
+					iters := run.Iterations
+					start := 0
+					if len(iters) > 4 {
+						start = len(iters) - 4
+					}
+					for i := len(iters) - 1; i >= start; i-- {
+						ir := iters[i]
+						iterNode := &TreeNode{
+							Kind:      NodeIteration,
+							Label:     fmt.Sprintf("iteration %d", ir.Iteration),
+							AgentName: obj.Name,
+							StepLabel: stepLabel,
+							Iteration: ir.Iteration,
+							Depth:     2,
+						}
+						loopNode.Children = append(loopNode.Children, iterNode)
+					}
 				}
 			}
 
@@ -562,8 +600,8 @@ func (m TUIModel) View() string {
 		return m.centeredMessage("Connecting to master...")
 	}
 
-	// Layout: left pane (40%) | right pane (60%)
-	leftWidth := m.width * 2 / 5
+	// Layout: left pane (30%) | right pane (70%)
+	leftWidth := m.width * 3 / 10
 	if leftWidth < 20 {
 		leftWidth = 20
 	}
@@ -578,8 +616,12 @@ func (m TUIModel) View() string {
 		contentHeight = 5
 	}
 
-	leftContent := m.renderTree(leftWidth, contentHeight)
-	rightContent := m.renderDetail(rightWidth, contentHeight)
+	// Hard-clip both panes to contentHeight. lipgloss Height() is a minimum
+	// (pads short content) but does NOT clip overflow. Without clipping,
+	// content that exceeds the height escapes the container and corrupts
+	// the opposite pane's layout.
+	leftContent := clipToHeight(m.renderTree(leftWidth, contentHeight), contentHeight)
+	rightContent := clipToHeight(m.renderDetail(rightWidth, contentHeight), contentHeight)
 
 	// Style panes
 	leftStyle := lipgloss.NewStyle().
@@ -692,12 +734,11 @@ func (m TUIModel) renderTree(width, height int) string {
 
 		label := node.Label
 
-		// Most recent iteration is bold
+		// Live/in-progress iteration is bold, completed iterations are dim
 		if node.Kind == NodeIteration {
 			run, ok := m.runs[node.AgentName]
-			if ok && len(run.Iterations) > 0 {
-				latest := run.Iterations[len(run.Iterations)-1]
-				if node.Iteration == latest.Iteration {
+			if ok {
+				if run.LiveIter != nil && node.Iteration == run.LiveIter.Iteration {
 					label = boldStyle.Render(label)
 				} else {
 					label = dimStyle.Render(label)
@@ -872,16 +913,24 @@ func (m TUIModel) renderLoopView(node *TreeNode, width, height int) string {
 
 	sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, "│ ", right))
 
-	// Prompt editing input at the bottom (per spec: "❯ edit prompt…")
-	sb.WriteString("\n")
-	sb.WriteString(strings.Repeat("─", width-2))
-	sb.WriteString("\n")
-	m.promptInput.Width = width - 4
-	sb.WriteString("❯ ")
-	sb.WriteString(m.promptInput.View())
-	sb.WriteString("\n")
+	// Clip body to make room for pinned footer (separator + input = 2 lines)
+	footerHeight := 2
+	bodyHeight := height - footerHeight
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	body := clipToHeight(sb.String(), bodyHeight)
 
-	return sb.String()
+	// Build final output: clipped body + pinned footer
+	var result strings.Builder
+	result.WriteString(body)
+	result.WriteString("\n")
+	result.WriteString(strings.Repeat("─", width-2))
+	m.promptInput.Width = width - 4
+	result.WriteString("\n❯ ")
+	result.WriteString(m.promptInput.View())
+
+	return result.String()
 }
 
 // renderIterationView renders the detail for an iteration node.
@@ -893,7 +942,7 @@ func (m TUIModel) renderIterationView(node *TreeNode, width, height int) string 
 	sb.WriteString(headerStyle.Render(fmt.Sprintf("%s — iteration %d", node.AgentName, node.Iteration)))
 	sb.WriteString("\n\n")
 
-	// Find the iteration data
+	// Find the iteration data — check LiveIter first, then completed iterations.
 	run, hasRun := m.runs[node.AgentName]
 	if !hasRun {
 		sb.WriteString("No run data available.\n")
@@ -901,10 +950,14 @@ func (m TUIModel) renderIterationView(node *TreeNode, width, height int) string 
 	}
 
 	var iter *IterationResult
-	for i := range run.Iterations {
-		if run.Iterations[i].Iteration == node.Iteration {
-			iter = &run.Iterations[i]
-			break
+	if run.LiveIter != nil && run.LiveIter.Iteration == node.Iteration {
+		iter = run.LiveIter
+	} else {
+		for i := range run.Iterations {
+			if run.Iterations[i].Iteration == node.Iteration {
+				iter = &run.Iterations[i]
+				break
+			}
 		}
 	}
 
@@ -915,82 +968,87 @@ func (m TUIModel) renderIterationView(node *TreeNode, width, height int) string 
 
 	// Timing
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	duration := iter.FinishedAt.Sub(iter.StartedAt)
 	if iter.FinishedAt.IsZero() {
 		sb.WriteString(dimStyle.Render(fmt.Sprintf("Started: %s (running...)", iter.StartedAt.Format("15:04:05"))))
 	} else {
+		duration := iter.FinishedAt.Sub(iter.StartedAt)
 		sb.WriteString(dimStyle.Render(fmt.Sprintf("Duration: %s", duration.Truncate(time.Millisecond))))
 	}
 	sb.WriteString("\n\n")
 
-	// Output or error
+	// Error
 	if iter.Error != "" {
 		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 		sb.WriteString(errStyle.Render("Error: " + iter.Error))
 		sb.WriteString("\n")
 	}
 
-	if iter.Output != "" {
-		// Show output as chat message history
-		sb.WriteString(iter.Output)
-		sb.WriteString("\n")
-	}
+	// Render conversation messages
+	m.renderConvoMessages(&sb, iter.Messages, width)
 
 	return m.withInput(sb.String(), node, width, height)
 }
 
-// withInput appends the message input box to iteration view content.
-// The content is scrollable via m.scrollOffset (Page Up/Down keys).
-// Per spec: "Very long chat history: The LoopIterationView scrolls.
-// It does not truncate or drop messages."
+// renderConvoMessages renders a slice of ConvoMessages into the string builder.
+func (m TUIModel) renderConvoMessages(sb *strings.Builder, msgs []ConvoMessage, width int) {
+	toolStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+	resultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	for _, msg := range msgs {
+		switch msg.Type {
+		case "text":
+			sb.WriteString(msg.Content)
+		case "tool_use":
+			sb.WriteString("\n")
+			sb.WriteString(toolStyle.Render(fmt.Sprintf("[Tool: %s]", msg.Content)))
+			sb.WriteString("\n")
+		case "tool_result":
+			content := msg.Content
+			if len(content) > 200 {
+				content = content[:200] + "…"
+			}
+			sb.WriteString(resultStyle.Render(content))
+			sb.WriteString("\n")
+		}
+	}
+}
+
+// withInput renders iteration view content in a scrollable viewport with a
+// pinned footer (scroll indicator + separator + message input).
+// Returns exactly `height` lines, preventing content from escaping the container.
 func (m TUIModel) withInput(content string, node *TreeNode, width, height int) string {
-	inputHeight := 3 // separator + input + padding
-	maxContentLines := height - inputHeight
-	if maxContentLines < 3 {
-		maxContentLines = 3
+	// Footer occupies exactly 3 lines: indicator/blank + separator + input
+	footerHeight := 3
+	vpHeight := height - footerHeight
+	if vpHeight < 1 {
+		vpHeight = 1
 	}
 
-	contentLines := strings.Split(content, "\n")
-	totalLines := len(contentLines)
-
-	// Clamp scroll offset to valid range
-	maxScroll := totalLines - maxContentLines
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	offset := m.scrollOffset
-	if offset > maxScroll {
-		offset = maxScroll
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	// Show the visible window of content lines
-	endIdx := offset + maxContentLines
-	if endIdx > totalLines {
-		endIdx = totalLines
-	}
-	visibleLines := contentLines[offset:endIdx]
+	vp := viewport{width: width, height: vpHeight, offset: m.scrollOffset}
+	body, off, total := vp.render(content)
 
 	var sb strings.Builder
-	sb.WriteString(strings.Join(visibleLines, "\n"))
+	sb.WriteString(body)
 
-	// Show scroll indicator if content overflows
-	if totalLines > maxContentLines {
-		sb.WriteString(fmt.Sprintf("\n[%d-%d of %d lines]", offset+1, endIdx, totalLines))
+	// Footer line 1: scroll indicator (or blank to maintain fixed height)
+	if total > vpHeight {
+		end := off + vpHeight
+		if end > total {
+			end = total
+		}
+		sb.WriteString(fmt.Sprintf("\n[%d-%d of %d lines]", off+1, end, total))
+	} else {
+		sb.WriteString("\n")
 	}
 
-	// Separator
+	// Footer line 2: separator
 	sb.WriteString("\n")
 	sb.WriteString(strings.Repeat("─", width-2))
-	sb.WriteString("\n")
 
-	// Input
+	// Footer line 3: input
 	m.msgInput.Width = width - 4
-	sb.WriteString("❯ ")
+	sb.WriteString("\n❯ ")
 	sb.WriteString(m.msgInput.View())
-	sb.WriteString("\n")
 
 	return sb.String()
 }
@@ -1002,6 +1060,63 @@ func (m TUIModel) centeredMessage(msg string) string {
 		Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center)
 	return style.Render(msg)
+}
+
+// --- Viewport / container helpers ---
+
+// viewport is a scrollable, height-clipped container for text content.
+// It ensures the rendered output is exactly the specified height in lines,
+// preventing content from escaping its container.
+type viewport struct {
+	width  int
+	height int // exact number of output lines
+	offset int // scroll offset in lines (0 = top)
+}
+
+// render returns exactly v.height lines of content, scrolled by v.offset.
+// It also returns the clamped offset and total line count for scroll indicators.
+func (v viewport) render(content string) (string, int, int) {
+	lines := strings.Split(content, "\n")
+	total := len(lines)
+
+	maxOff := total - v.height
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	off := v.offset
+	if off > maxOff {
+		off = maxOff
+	}
+	if off < 0 {
+		off = 0
+	}
+
+	end := off + v.height
+	if end > total {
+		end = total
+	}
+
+	// Build exactly v.height lines: visible content + blank padding
+	result := make([]string, v.height)
+	copy(result, lines[off:end])
+
+	return strings.Join(result, "\n"), off, total
+}
+
+// clipToHeight returns exactly `height` lines from content.
+// Truncates if content is taller, pads with empty lines if shorter.
+func clipToHeight(content string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	result := make([]string, height)
+	if len(lines) > height {
+		copy(result, lines[:height])
+	} else {
+		copy(result, lines)
+	}
+	return strings.Join(result, "\n")
 }
 
 // --- Utility functions ---

@@ -80,7 +80,7 @@ func cmdMaster(args []string) {
 	cluster.LoadState(store, statePath)
 
 	// Create and start server with executor using the real claude CLI.
-	srv := cluster.NewServer(store, addr, runtime.CallClaudeCapture)
+	srv := cluster.NewServer(store, addr, runtime.CallClaudeStreaming)
 
 	// Handle shutdown signals
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

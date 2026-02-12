@@ -344,7 +344,7 @@ func TestServerInjectForwarding(t *testing.T) {
 	// Track prompts to verify injection delivery
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()
@@ -478,7 +478,7 @@ func TestServerSteerStateIncludesMethodsAndPipelines(t *testing.T) {
 // reflected in subsequent steer_state pushes to all connected clients.
 func TestServerEditPromptUpdatesMethodCache(t *testing.T) {
 	// Use a slow claude function so the agent stays alive during the test.
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		select {
 		case <-time.After(5 * time.Second):
 			return "ok", nil
@@ -582,7 +582,7 @@ func TestConcurrentSteerSessionConsistency(t *testing.T) {
 	// Track all prompts received by the agent.
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()

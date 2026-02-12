@@ -80,14 +80,6 @@ No remaining items. All spec features are implemented.
 
 
 
-Missing:
-- apply should restart agents
-- toggles do not work when there are no children (makes sense)
-
-
-
-
-
 
 
 

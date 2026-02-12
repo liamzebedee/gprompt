@@ -39,11 +39,65 @@ func ValidPriority(p Priority) bool {
 	return false
 }
 
+// DueDate is a date-only wrapper (no time component) that serialises as "YYYY-MM-DD".
+type DueDate struct {
+	time.Time
+	Valid bool // false means no due date set
+}
+
+// DueDateLayout is the expected format for parsing/formatting due dates.
+const DueDateLayout = "2006-01-02"
+
+// ParseDueDate parses a "YYYY-MM-DD" string into a DueDate.
+func ParseDueDate(s string) (DueDate, error) {
+	if s == "" {
+		return DueDate{}, nil
+	}
+	t, err := time.Parse(DueDateLayout, s)
+	if err != nil {
+		return DueDate{}, fmt.Errorf("invalid due date %q (expected YYYY-MM-DD): %w", s, err)
+	}
+	return DueDate{Time: t, Valid: true}, nil
+}
+
+func (d DueDate) String() string {
+	if !d.Valid {
+		return ""
+	}
+	return d.Time.Format(DueDateLayout)
+}
+
+func (d DueDate) MarshalJSON() ([]byte, error) {
+	if !d.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(d.Time.Format(DueDateLayout))
+}
+
+func (d *DueDate) UnmarshalJSON(data []byte) error {
+	var s *string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	if s == nil || *s == "" {
+		d.Valid = false
+		return nil
+	}
+	t, err := time.Parse(DueDateLayout, *s)
+	if err != nil {
+		return err
+	}
+	d.Time = t
+	d.Valid = true
+	return nil
+}
+
 type Item struct {
 	ID        int       `json:"id"`
 	Title     string    `json:"title"`
 	Status    Status    `json:"status"`
 	Priority  Priority  `json:"priority,omitempty"`
+	DueDate   DueDate   `json:"due_date,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -119,22 +173,39 @@ func (s *Store) nextID() int {
 }
 
 func (s *Store) Add(title string) Item {
-	return s.AddWithPriority(title, PriorityNone)
+	return s.AddFull(title, PriorityNone, DueDate{})
 }
 
 // AddWithPriority creates a new item with the given title and priority.
 func (s *Store) AddWithPriority(title string, priority Priority) Item {
+	return s.AddFull(title, priority, DueDate{})
+}
+
+// AddFull creates a new item with the given title, priority, and optional due date.
+func (s *Store) AddFull(title string, priority Priority, due DueDate) Item {
 	now := time.Now()
 	item := Item{
 		ID:        s.nextID(),
 		Title:     title,
 		Status:    StatusPending,
 		Priority:  priority,
+		DueDate:   due,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	s.Items = append(s.Items, item)
 	return item
+}
+
+// SetDueDate updates the due date of an existing item. Pass an empty DueDate to clear it.
+func (s *Store) SetDueDate(id int, due DueDate) error {
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	item.DueDate = due
+	item.UpdatedAt = time.Now()
+	return nil
 }
 
 func (s *Store) Get(id int) (*Item, error) {
@@ -147,6 +218,9 @@ func (s *Store) Get(id int) (*Item, error) {
 }
 
 func (s *Store) SetStatus(id int, status Status) error {
+	if !ValidStatus(status) {
+		return fmt.Errorf("invalid status: %q (valid values: pending, in_progress, done)", status)
+	}
 	item, err := s.Get(id)
 	if err != nil {
 		return err
@@ -169,6 +243,9 @@ func (s *Store) Edit(id int, newTitle string) error {
 
 // SetPriority updates the priority of an existing item.
 func (s *Store) SetPriority(id int, priority Priority) error {
+	if !ValidPriority(priority) {
+		return fmt.Errorf("invalid priority: %q (valid values: low, medium, high, or empty to clear)", priority)
+	}
 	item, err := s.Get(id)
 	if err != nil {
 		return err
@@ -235,7 +312,7 @@ func (s *Store) Export(w io.Writer) error {
 	defer cw.Flush()
 
 	// Header row
-	if err := cw.Write([]string{"id", "title", "status", "priority", "created_at", "updated_at"}); err != nil {
+	if err := cw.Write([]string{"id", "title", "status", "priority", "due_date", "created_at", "updated_at"}); err != nil {
 		return err
 	}
 
@@ -245,6 +322,7 @@ func (s *Store) Export(w io.Writer) error {
 			item.Title,
 			string(item.Status),
 			string(item.Priority),
+			item.DueDate.String(),
 			item.CreatedAt.Format(time.RFC3339),
 			item.UpdatedAt.Format(time.RFC3339),
 		}

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	"p2p/cluster"
 	"p2p/debug"
 	"p2p/pipeline"
 	"p2p/registry"
@@ -206,10 +207,11 @@ type streamEvent struct {
 }
 
 type streamInnerEvent struct {
-	Type    string       `json:"type"`
-	Delta   *streamDelta `json:"delta"`
-	Usage   *streamUsage `json:"usage"`
-	Message *struct {
+	Type         string              `json:"type"`
+	Delta        *streamDelta        `json:"delta"`
+	ContentBlock *streamContentBlock `json:"content_block"`
+	Usage        *streamUsage        `json:"usage"`
+	Message      *struct {
 		Usage *streamUsage `json:"usage"`
 	} `json:"message"`
 }
@@ -217,6 +219,13 @@ type streamInnerEvent struct {
 type streamDelta struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+// streamContentBlock represents a content_block_start event's content_block field.
+type streamContentBlock struct {
+	Type string `json:"type"` // "text", "tool_use", "tool_result"
+	Name string `json:"name"` // tool name (for tool_use)
+	ID   string `json:"id"`   // block ID
 }
 
 type streamUsage struct {
@@ -364,6 +373,93 @@ func CallClaudeCapture(ctx context.Context, prompt string) (string, error) {
 	}
 
 	return strings.TrimSpace(buf.String()), nil
+}
+
+// CallClaudeStreaming runs claude with stream-json output, emitting ConvoMessages
+// via the onMessage callback as events arrive. This is used by the cluster executor
+// to stream live iteration content to the steer TUI.
+func CallClaudeStreaming(ctx context.Context, prompt string, onMessage func(cluster.ConvoMessage)) (string, error) {
+	cmd := claudeCmd(ctx, "--output-format", "stream-json", "--verbose", "--include-partial-messages")
+	cmd.Stdin = strings.NewReader(prompt)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	var result string
+	var msgCounter int
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		// Try as final result first.
+		var res streamResult
+		if json.Unmarshal(line, &res) == nil && res.Type == "result" {
+			result = res.Result
+			continue
+		}
+
+		// Parse as stream_event.
+		var ev streamEvent
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+
+		if ev.Type != "stream_event" || onMessage == nil {
+			continue
+		}
+
+		var inner streamInnerEvent
+		if json.Unmarshal(ev.Event, &inner) != nil {
+			continue
+		}
+
+		switch inner.Type {
+		case "content_block_delta":
+			if inner.Delta != nil && inner.Delta.Type == "text_delta" && inner.Delta.Text != "" {
+				msgCounter++
+				onMessage(cluster.ConvoMessage{
+					ID:      fmt.Sprintf("msg-%d", msgCounter),
+					Type:    "text",
+					Content: inner.Delta.Text,
+				})
+			}
+		case "content_block_start":
+			if inner.ContentBlock != nil && inner.ContentBlock.Type == "tool_use" {
+				msgCounter++
+				onMessage(cluster.ConvoMessage{
+					ID:      fmt.Sprintf("msg-%d", msgCounter),
+					Type:    "tool_use",
+					Content: inner.ContentBlock.Name,
+				})
+			}
+			if inner.ContentBlock != nil && inner.ContentBlock.Type == "tool_result" {
+				msgCounter++
+				onMessage(cluster.ConvoMessage{
+					ID:      fmt.Sprintf("msg-%d", msgCounter),
+					Type:    "tool_result",
+					Content: inner.ContentBlock.Name,
+				})
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(result), nil
 }
 
 // callClaudeJSON runs claude -p --output-format json and extracts the result field.

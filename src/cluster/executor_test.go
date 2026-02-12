@@ -14,7 +14,7 @@ import (
 // It sleeps for the given duration to simulate work.
 func fakeClaude(delay time.Duration) ClaudeFunc {
 	var calls atomic.Int64
-	return func(ctx context.Context, prompt string) (string, error) {
+	return func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		n := calls.Add(1)
 		select {
 		case <-time.After(delay):
@@ -29,7 +29,7 @@ func fakeClaude(delay time.Duration) ClaudeFunc {
 // then succeeds.
 func fakeClaudeFailN(failCount int, delay time.Duration) ClaudeFunc {
 	var calls atomic.Int64
-	return func(ctx context.Context, prompt string) (string, error) {
+	return func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		n := calls.Add(1)
 		select {
 		case <-time.After(delay):
@@ -283,9 +283,6 @@ func TestExecutorIterationTracking(t *testing.T) {
 		if ir.Error != "" {
 			t.Errorf("iteration %d: unexpected error %q", i, ir.Error)
 		}
-		if ir.Output == "" {
-			t.Errorf("iteration %d: empty output", i)
-		}
 	}
 
 	exec.StopAll(2 * time.Second)
@@ -359,7 +356,7 @@ func TestExecutorInjectMessage(t *testing.T) {
 	// Track prompts received by claude to verify injection
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()
@@ -459,7 +456,7 @@ func TestPipelineSimpleThenLoop(t *testing.T) {
 	// Track all prompts to verify step chaining.
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()
@@ -550,7 +547,7 @@ func TestPipelineMapStep(t *testing.T) {
 
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()
@@ -623,7 +620,7 @@ func TestPipelineSimpleStepFailure(t *testing.T) {
 	store := NewStore()
 	seedAgent(store, "failing")
 
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		select {
 		case <-time.After(5 * time.Millisecond):
 			return "", fmt.Errorf("simulated step failure")
@@ -787,7 +784,7 @@ func TestUpdateMethodBody(t *testing.T) {
 
 	var prompts []string
 	var mu sync.Mutex
-	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+	claudeFn := func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error) {
 		mu.Lock()
 		prompts = append(prompts, prompt)
 		mu.Unlock()

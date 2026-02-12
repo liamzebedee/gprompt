@@ -43,10 +43,19 @@ import (
 	"time"
 )
 
-// ClaudeFunc is the signature for invoking claude. It takes a context and a
-// prompt string, and returns the output text or an error. Production code
-// provides a function that calls the claude CLI; tests provide a fake.
-type ClaudeFunc func(ctx context.Context, prompt string) (string, error)
+// ConvoMessage represents a single message in a live iteration conversation.
+// Messages are append-only and identified by unique IDs for deduplication.
+type ConvoMessage struct {
+	ID      string `json:"id"`      // unique, e.g. "msg-7"
+	Type    string `json:"type"`    // "text", "tool_use", "tool_result"
+	Content string `json:"content"`
+}
+
+// ClaudeFunc is the signature for invoking claude. It takes a context, a
+// prompt string, and an onMessage callback for streaming conversation events.
+// The callback may be nil (e.g. for pipeline setup steps that don't need streaming).
+// Production code provides a function that calls the claude CLI; tests provide a fake.
+type ClaudeFunc func(ctx context.Context, prompt string, onMessage func(ConvoMessage)) (string, error)
 
 // IterationResult records the outcome of a single loop iteration.
 type IterationResult struct {
@@ -56,8 +65,8 @@ type IterationResult struct {
 	StartedAt time.Time `json:"started_at"`
 	// FinishedAt is when this iteration completed (success or failure).
 	FinishedAt time.Time `json:"finished_at"`
-	// Output is the claude response text (empty on error).
-	Output string `json:"output,omitempty"`
+	// Messages is the live conversation history (text, tool_use, tool_result).
+	Messages []ConvoMessage `json:"messages,omitempty"`
 	// Error is the error message if claude failed (empty on success).
 	Error string `json:"error,omitempty"`
 }
@@ -93,6 +102,10 @@ type AgentRun struct {
 	// prompt so all future iterations use the new text.
 	methodCh chan methodUpdate
 
+	// liveIter is the currently executing iteration (nil when between iterations).
+	// Protected by mu.
+	liveIter *IterationResult
+
 	// cancel stops this agent's goroutine.
 	cancel context.CancelFunc
 	// done is closed when the agent goroutine exits.
@@ -124,6 +137,42 @@ func (r *AgentRun) SnapshotIterations() []IterationResult {
 	return cp
 }
 
+// SetLiveIter sets the currently executing iteration.
+func (r *AgentRun) SetLiveIter(ir *IterationResult) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.liveIter = ir
+}
+
+// AppendLiveMessage appends a message to the live iteration.
+func (r *AgentRun) AppendLiveMessage(msg ConvoMessage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.liveIter != nil {
+		r.liveIter.Messages = append(r.liveIter.Messages, msg)
+	}
+}
+
+// ClearLiveIter clears the live iteration pointer.
+func (r *AgentRun) ClearLiveIter() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.liveIter = nil
+}
+
+// SnapshotLiveIter returns a copy of the live iteration, or nil if none.
+func (r *AgentRun) SnapshotLiveIter() *IterationResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.liveIter == nil {
+		return nil
+	}
+	cp := *r.liveIter
+	cp.Messages = make([]ConvoMessage, len(r.liveIter.Messages))
+	copy(cp.Messages, r.liveIter.Messages)
+	return &cp
+}
+
 // AgentRunSnapshot is a serializable snapshot of a running agent's iteration history.
 // It is included in SteerStatePayload for steer clients, NOT persisted to disk.
 // This keeps runtime/ephemeral iteration data separate from the declarative
@@ -133,6 +182,7 @@ type AgentRunSnapshot struct {
 	RevisionID string            `json:"revision_id"`
 	StartedAt  time.Time         `json:"started_at"`
 	Iterations []IterationResult `json:"iterations"`
+	LiveIter   *IterationResult  `json:"live_iter,omitempty"`
 }
 
 // Executor manages the lifecycle of running agent goroutines.
@@ -147,6 +197,9 @@ type Executor struct {
 	runs        map[string]*AgentRun   // keyed by agent name
 	pipelines   map[string]*PipelineDef // keyed by agent name, cached from apply
 	onIteration func(agentName string)  // called after each iteration completes
+
+	pushMu   sync.Mutex
+	lastPush map[string]time.Time // throttle streaming pushes per agent
 }
 
 // NewExecutor creates an executor bound to a store and a claude invocation
@@ -161,6 +214,7 @@ func NewExecutor(store *Store, claudeFn ClaudeFunc) *Executor {
 		rootStop:  cancel,
 		runs:      make(map[string]*AgentRun),
 		pipelines: make(map[string]*PipelineDef),
+		lastPush:  make(map[string]time.Time),
 	}
 }
 
@@ -337,7 +391,7 @@ func (e *Executor) runPipeline(ctx context.Context, run *AgentRun, p *PipelineDe
 			}
 
 			log.Printf("executor: agent %q running simple step %d/%d (%s)", run.Name, i+1, len(p.Steps), step.Label)
-			output, err := e.claudeFn(ctx, prompt)
+			output, err := e.claudeFn(ctx, prompt, nil)
 			if err != nil {
 				if ctx.Err() != nil {
 					log.Printf("executor: agent %q step %d (%s) cancelled", run.Name, i+1, step.Label)
@@ -386,7 +440,7 @@ func (e *Executor) runPipeline(ctx context.Context, run *AgentRun, p *PipelineDe
 				go func(idx int, itemText string) {
 					defer wg.Done()
 					prompt := itemText + "\n\n" + body
-					result, err := e.claudeFn(mapCtx, prompt)
+					result, err := e.claudeFn(mapCtx, prompt, nil)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil && firstErr == nil {
@@ -509,9 +563,16 @@ func (e *Executor) runAgentLoop(ctx context.Context, run *AgentRun, firstPrompt 
 			Iteration: iteration,
 			StartedAt: time.Now(),
 		}
+		run.SetLiveIter(&ir)
+		e.fireOnIteration(run.Name) // TUI sees "running..." immediately
 
 		log.Printf("executor: agent %q starting iteration %d", run.Name, iteration)
-		output, err := e.claudeFn(ctx, iterPrompt)
+		_, err := e.claudeFn(ctx, iterPrompt, func(msg ConvoMessage) {
+			run.AppendLiveMessage(msg)
+			e.fireOnStreaming(run.Name)
+		})
+
+		run.ClearLiveIter()
 		ir.FinishedAt = time.Now()
 
 		if err != nil {
@@ -530,10 +591,9 @@ func (e *Executor) runAgentLoop(ctx context.Context, run *AgentRun, firstPrompt 
 			continue
 		}
 
-		ir.Output = output
 		run.addIteration(ir)
 		e.fireOnIteration(run.Name)
-		log.Printf("executor: agent %q iteration %d complete (%d bytes output)", run.Name, iteration, len(output))
+		log.Printf("executor: agent %q iteration %d complete (%d messages)", run.Name, iteration, len(ir.Messages))
 	}
 }
 
@@ -545,6 +605,19 @@ func (e *Executor) fireOnIteration(agentName string) {
 	if fn != nil {
 		fn(agentName)
 	}
+}
+
+// fireOnStreaming calls the onIteration callback with a 50ms throttle per agent,
+// preventing excessive state pushes during rapid streaming updates.
+func (e *Executor) fireOnStreaming(agentName string) {
+	e.pushMu.Lock()
+	if time.Since(e.lastPush[agentName]) < 50*time.Millisecond {
+		e.pushMu.Unlock()
+		return
+	}
+	e.lastPush[agentName] = time.Now()
+	e.pushMu.Unlock()
+	e.fireOnIteration(agentName)
 }
 
 // Stop halts a running agent. It cancels the agent's context and waits
@@ -746,6 +819,7 @@ func (e *Executor) Snapshot() map[string]AgentRunSnapshot {
 			RevisionID: run.RevisionID,
 			StartedAt:  run.StartedAt,
 			Iterations: iters,
+			LiveIter:   run.SnapshotLiveIter(),
 		}
 	}
 	return result

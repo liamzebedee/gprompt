@@ -47,9 +47,9 @@ func TestTUIRebuildTree(t *testing.T) {
 			Name:      "builder",
 			StartedAt: time.Now(),
 			Iterations: []IterationResult{
-				{Iteration: 1, StartedAt: time.Now().Add(-30 * time.Second), FinishedAt: time.Now().Add(-20 * time.Second), Output: "done 1"},
-				{Iteration: 2, StartedAt: time.Now().Add(-20 * time.Second), FinishedAt: time.Now().Add(-10 * time.Second), Output: "done 2"},
-				{Iteration: 3, StartedAt: time.Now().Add(-10 * time.Second), FinishedAt: time.Now(), Output: "done 3"},
+				{Iteration: 1, StartedAt: time.Now().Add(-30 * time.Second), FinishedAt: time.Now().Add(-20 * time.Second), Messages: []ConvoMessage{{ID: "m1", Type: "text", Content: "done 1"}}},
+				{Iteration: 2, StartedAt: time.Now().Add(-20 * time.Second), FinishedAt: time.Now().Add(-10 * time.Second), Messages: []ConvoMessage{{ID: "m2", Type: "text", Content: "done 2"}}},
+				{Iteration: 3, StartedAt: time.Now().Add(-10 * time.Second), FinishedAt: time.Now(), Messages: []ConvoMessage{{ID: "m3", Type: "text", Content: "done 3"}}},
 			},
 		},
 	}
@@ -104,7 +104,7 @@ func TestTUIRebuildTreeMaxIterations(t *testing.T) {
 			Iteration:  i,
 			StartedAt:  time.Now(),
 			FinishedAt: time.Now(),
-			Output:     "out",
+			Messages:   []ConvoMessage{{ID: "m1", Type: "text", Content: "out"}},
 		})
 	}
 	m.runs = map[string]AgentRunSnapshot{
@@ -226,7 +226,7 @@ func TestTUIPipelineAwareTree(t *testing.T) {
 		"planner": {
 			Name: "planner",
 			Iterations: []IterationResult{
-				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Output: "reviewed"},
+				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Messages: []ConvoMessage{{ID: "m1", Type: "text", Content: "reviewed"}}},
 			},
 		},
 	}
@@ -325,10 +325,14 @@ func TestTUIScrollableIterationView(t *testing.T) {
 		},
 	}
 
-	// Create a long output that exceeds the view height
-	longOutput := ""
+	// Create long messages that exceed the view height
+	var longMessages []ConvoMessage
 	for i := 0; i < 50; i++ {
-		longOutput += fmt.Sprintf("Line %d of output\n", i+1)
+		longMessages = append(longMessages, ConvoMessage{
+			ID:      fmt.Sprintf("msg-%d", i+1),
+			Type:    "text",
+			Content: fmt.Sprintf("Line %d of output\n", i+1),
+		})
 	}
 
 	m.runs = map[string]AgentRunSnapshot{
@@ -339,7 +343,7 @@ func TestTUIScrollableIterationView(t *testing.T) {
 					Iteration:  1,
 					StartedAt:  time.Now().Add(-10 * time.Second),
 					FinishedAt: time.Now(),
-					Output:     longOutput,
+					Messages:   longMessages,
 				},
 			},
 		},
@@ -482,7 +486,7 @@ func TestTUIPromptEditFocusSwitching(t *testing.T) {
 		"builder": {
 			Name: "builder",
 			Iterations: []IterationResult{
-				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Output: "done"},
+				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Messages: []ConvoMessage{{ID: "m1", Type: "text", Content: "done"}}},
 			},
 		},
 	}
@@ -553,7 +557,7 @@ func TestTUITerminalResize(t *testing.T) {
 		"builder": {
 			Name: "builder",
 			Iterations: []IterationResult{
-				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Output: "done"},
+				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Messages: []ConvoMessage{{ID: "m1", Type: "text", Content: "done"}}},
 			},
 		},
 	}
@@ -676,5 +680,198 @@ func TestMeanStddev(t *testing.T) {
 	mean3, stddev3 := meanStddev(nil)
 	if mean3 != 0 || stddev3 != 0 {
 		t.Errorf("empty: expected 0,0, got %f,%f", mean3, stddev3)
+	}
+}
+
+func TestViewportRender(t *testing.T) {
+	content := "line1\nline2\nline3\nline4\nline5"
+
+	// Viewport smaller than content: shows first window
+	vp := viewport{width: 80, height: 3, offset: 0}
+	out, off, total := vp.render(content)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected exactly 3 lines, got %d", len(lines))
+	}
+	if off != 0 || total != 5 {
+		t.Errorf("expected off=0, total=5, got off=%d, total=%d", off, total)
+	}
+	if lines[0] != "line1" {
+		t.Errorf("expected 'line1', got %q", lines[0])
+	}
+
+	// Scroll to middle
+	vp.offset = 2
+	out, off, _ = vp.render(content)
+	lines = strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected exactly 3 lines, got %d", len(lines))
+	}
+	if off != 2 {
+		t.Errorf("expected off=2, got %d", off)
+	}
+	if lines[0] != "line3" {
+		t.Errorf("expected 'line3', got %q", lines[0])
+	}
+
+	// Offset clamped to max
+	vp.offset = 999
+	out, off, _ = vp.render(content)
+	lines = strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected exactly 3 lines, got %d", len(lines))
+	}
+	if off != 2 { // max = 5 - 3 = 2
+		t.Errorf("expected off clamped to 2, got %d", off)
+	}
+
+	// Viewport larger than content: pads with blank lines
+	vp2 := viewport{width: 80, height: 8, offset: 0}
+	out2, _, _ := vp2.render(content)
+	lines2 := strings.Split(out2, "\n")
+	if len(lines2) != 8 {
+		t.Fatalf("expected exactly 8 lines (padded), got %d", len(lines2))
+	}
+	if lines2[5] != "" || lines2[6] != "" || lines2[7] != "" {
+		t.Errorf("expected blank padding lines")
+	}
+}
+
+func TestClipToHeight(t *testing.T) {
+	content := "a\nb\nc\nd\ne"
+
+	// Clip to shorter
+	out := clipToHeight(content, 3)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(lines))
+	}
+	if lines[2] != "c" {
+		t.Errorf("expected 'c', got %q", lines[2])
+	}
+
+	// Clip to taller (pads)
+	out2 := clipToHeight(content, 8)
+	lines2 := strings.Split(out2, "\n")
+	if len(lines2) != 8 {
+		t.Fatalf("expected 8 lines, got %d", len(lines2))
+	}
+
+	// Zero height
+	out3 := clipToHeight(content, 0)
+	if out3 != "" {
+		t.Errorf("expected empty string for height=0, got %q", out3)
+	}
+}
+
+// TestTUIContentNeverExceedsHeight verifies that the iteration view with
+// very long content never produces more lines than the specified height.
+// This is a regression test for the container overflow bug where long
+// conversations would escape the right pane and corrupt the tree pane.
+func TestTUIContentNeverExceedsHeight(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.width = 80
+	m.height = 20
+	m.ready = true
+	m.objects = []ClusterObject{
+		{
+			Name:       "builder",
+			Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+		},
+	}
+
+	// Create very long conversation (200 messages)
+	var msgs []ConvoMessage
+	for i := 0; i < 200; i++ {
+		msgs = append(msgs, ConvoMessage{
+			ID:      fmt.Sprintf("msg-%d", i+1),
+			Type:    "text",
+			Content: fmt.Sprintf("Message %d with some content\n", i+1),
+		})
+	}
+
+	m.runs = map[string]AgentRunSnapshot{
+		"builder": {
+			Name: "builder",
+			Iterations: []IterationResult{
+				{Iteration: 1, StartedAt: time.Now(), Messages: msgs},
+			},
+			LiveIter: &IterationResult{Iteration: 1, StartedAt: time.Now(), Messages: msgs},
+		},
+	}
+
+	m.rebuildTree()
+	m.cursor = 2 // iteration node
+
+	contentHeight := m.height - 2
+	node := m.flatTree[m.cursor]
+
+	// Test at various scroll offsets
+	for _, offset := range []int{0, 10, 50, 100, 999999} {
+		m.scrollOffset = offset
+		result := m.renderIterationView(node, 60, contentHeight)
+		lines := strings.Split(result, "\n")
+		if len(lines) != contentHeight {
+			t.Errorf("scrollOffset=%d: expected exactly %d lines, got %d", offset, contentHeight, len(lines))
+		}
+	}
+
+	// Also verify the full View() output doesn't exceed terminal height
+	m.scrollOffset = 999999
+	view := m.View()
+	viewLines := strings.Split(view, "\n")
+	if len(viewLines) > m.height {
+		t.Errorf("View() produced %d lines, exceeds terminal height %d", len(viewLines), m.height)
+	}
+}
+
+// TestTUILoopViewNeverExceedsHeight verifies that the loop view with a very
+// long prompt clips to the container height with the input pinned at bottom.
+func TestTUILoopViewNeverExceedsHeight(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.width = 120
+	m.height = 20
+	m.ready = true
+
+	// Create a very long prompt body
+	var longPrompt strings.Builder
+	for i := 0; i < 100; i++ {
+		longPrompt.WriteString(fmt.Sprintf("Step %d: do something important\n", i+1))
+	}
+
+	m.objects = []ClusterObject{
+		{
+			Name:       "builder",
+			State:      RunStateRunning,
+			Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+		},
+	}
+	m.methods = map[string]map[string]string{
+		"builder": {"build": longPrompt.String()},
+	}
+	m.runs = map[string]AgentRunSnapshot{}
+
+	m.rebuildTree()
+	m.cursor = 1 // loop node
+
+	contentHeight := m.height - 2
+	node := m.flatTree[m.cursor]
+	result := m.renderLoopView(node, 80, contentHeight)
+	lines := strings.Split(result, "\n")
+
+	if len(lines) != contentHeight {
+		t.Errorf("renderLoopView: expected exactly %d lines, got %d", contentHeight, len(lines))
+	}
+
+	// Input should be pinned at bottom
+	lastLine := lines[len(lines)-1]
+	if !containsStr(lastLine, "❯") {
+		t.Errorf("expected input prompt '❯' on last line, got %q", lastLine)
+	}
+
+	// Separator should be second-to-last
+	sepLine := lines[len(lines)-2]
+	if !containsStr(sepLine, "───") {
+		t.Errorf("expected separator on second-to-last line, got %q", sepLine)
 	}
 }

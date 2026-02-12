@@ -1,14 +1,13 @@
 p programming language
 ======================
 
+**agent swarms, defined in code**.
+
 p is a new programming language/runtime for prompting and agents.
 
-It's a mixture of a proglang built for markdown prompting, an agent harness that natively supports (ralph) looping and multi-step pipelines, a cluster system that allows you to define and scale these ralph loops declaratively and independently of eachother (build loop, bugfix loop), and a terminal UI that allows you to hook into and steer at multiple levels of the stack (agent, loop prompt, individual loop iteration).
+It's a mixture of a proglang built for markdown prompting, an agent harness that natively supports (ralph) looping and multi-step pipelines, a cluster system that allows you to define and scale these ralph loops declaratively and independently of eachother (build loop, bugfix loop), and a terminal UI that allows you to hook into and steer at multiple levels as they are running (agent, loop prompt, individual loop iteration).
 
 It's a bit of invention at 4 different layers of the stack. I was tired of .sh files, .md files, too many files, and no composability in prompts - so I built the programming language. I was tired of not being able to write loops, so I built that in to the runtime. I was tired of managing terminals, tmux, different `claude` instances, and running different commands for each terminal - so I built the cluster software. I started Ralphing and realised I needed other agents to supervise the Ralph loop and doing this in bash and writing all this custom code would not scale at all - I needed a new programming language that had these as first-class primitives. That is what P is designed to be.  
-
-Conversely, a lot of AI stuff is bullshit slop. I also want to say I'm here for the quality. I thought deeply about what I needed to build actual things of craft and that included steering at every level of the stack - agents, loops, prompts. It also included leverage - being able to use agents to do the steering. Being able to write those agents quickly - some markdown, an agent defintion - and then deploying them to the cluster. 
-
 
 ## Intro
 
