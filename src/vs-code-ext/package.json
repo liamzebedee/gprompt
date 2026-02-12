@@ -1,0 +1,27 @@
+{
+  "name": "p-lang",
+  "displayName": "P Language",
+  "description": "Syntax highlighting for the P prompt composition language",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "p",
+        "aliases": ["P", "p"],
+        "extensions": [".p"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "p",
+        "scopeName": "source.p",
+        "path": "./syntaxes/p.tmLanguage.json"
+      }
+    ]
+  }
+}

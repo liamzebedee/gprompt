@@ -1,0 +1,177 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "P",
+  "scopeName": "source.p",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#agent-definition" },
+    { "include": "#method-definition" },
+    { "include": "#body-line" },
+    { "include": "#execution-line" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "^\\s*;.*$",
+      "name": "comment.line.semicolon.p"
+    },
+
+    "agent-definition": {
+      "match": "^(agent-[a-zA-Z0-9_-]+)(\\(([^)]*)\\))?(:)\\s*$",
+      "captures": {
+        "1": { "name": "entity.name.function.agent.p" },
+        "3": { "name": "variable.parameter.p", "patterns": [{ "include": "#param-list" }] },
+        "4": { "name": "punctuation.definition.method.colon.p" }
+      }
+    },
+
+    "method-definition": {
+      "match": "^([a-zA-Z0-9_-]+)(\\(([^)]*)\\))?(:)\\s*$",
+      "captures": {
+        "1": { "name": "entity.name.function.p" },
+        "3": { "name": "variable.parameter.p", "patterns": [{ "include": "#param-list" }] },
+        "4": { "name": "punctuation.definition.method.colon.p" }
+      }
+    },
+
+    "param-list": {
+      "match": "([a-zA-Z0-9_-]+)",
+      "name": "variable.parameter.p"
+    },
+
+    "body-line": {
+      "begin": "^\\t",
+      "end": "$",
+      "name": "string.unquoted.body.p",
+      "patterns": [
+        { "include": "#labeled-step" },
+        { "include": "#pipeline-step" },
+        { "include": "#pipeline" },
+        { "include": "#param-interpolation" },
+        { "include": "#loop-construct" },
+        { "include": "#map-construct" }
+      ]
+    },
+
+    "labeled-step": {
+      "match": "(->)\\s+([a-zA-Z0-9_-]+)\\s+\\(([a-zA-Z0-9_-]+)\\)",
+      "captures": {
+        "1": { "name": "keyword.operator.pipeline.p" },
+        "2": { "name": "variable.other.label.p" },
+        "3": { "name": "entity.name.function.reference.p" }
+      }
+    },
+
+    "pipeline-step": {
+      "match": "(->)\\s+([a-zA-Z0-9_-]+)",
+      "captures": {
+        "1": { "name": "keyword.operator.pipeline.p" },
+        "2": { "name": "entity.name.function.reference.p" }
+      }
+    },
+
+    "pipeline": {
+      "match": "\\s(->)\\s",
+      "captures": {
+        "1": { "name": "keyword.operator.pipeline.p" }
+      }
+    },
+
+    "param-interpolation": {
+      "match": "(\\[)([a-zA-Z0-9_-]+)(\\])",
+      "captures": {
+        "1": { "name": "punctuation.definition.interpolation.begin.p" },
+        "2": { "name": "variable.other.interpolation.p" },
+        "3": { "name": "punctuation.definition.interpolation.end.p" }
+      },
+      "name": "meta.interpolation.p"
+    },
+
+    "loop-construct": {
+      "match": "(loop)(\\()([a-zA-Z0-9_-]+)(\\))",
+      "captures": {
+        "1": { "name": "keyword.control.loop.p" },
+        "2": { "name": "punctuation.section.parens.begin.p" },
+        "3": { "name": "entity.name.function.reference.p" },
+        "4": { "name": "punctuation.section.parens.end.p" }
+      }
+    },
+
+    "map-construct": {
+      "match": "(map)(\\()([a-zA-Z0-9_-]+)(,)\\s*([a-zA-Z0-9_-]+)(\\))",
+      "captures": {
+        "1": { "name": "keyword.control.map.p" },
+        "2": { "name": "punctuation.section.parens.begin.p" },
+        "3": { "name": "variable.other.reference.p" },
+        "4": { "name": "punctuation.separator.comma.p" },
+        "5": { "name": "entity.name.function.reference.p" },
+        "6": { "name": "punctuation.section.parens.end.p" }
+      }
+    },
+
+    "execution-line": {
+      "begin": "^(?!\\t)(?!\\s*;)(?!\\s*$)(?![a-zA-Z0-9_-]+(\\([^)]*\\))?:\\s*$)",
+      "end": "$",
+      "name": "meta.execution-line.p",
+      "patterns": [
+        { "include": "#import" },
+        { "include": "#invocation-with-args" },
+        { "include": "#invocation-bare" },
+        { "include": "#plain-text" }
+      ]
+    },
+
+    "import": {
+      "match": "(@)([^\\s]+\\.p)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.import.p" },
+        "2": { "name": "string.other.import.path.p" }
+      }
+    },
+
+    "invocation-with-args": {
+      "match": "(@)([a-zA-Z0-9_-]+)(\\()([^)]*)(\\))",
+      "captures": {
+        "1": { "name": "punctuation.definition.invocation.p" },
+        "2": { "name": "entity.name.function.invocation.p" },
+        "3": { "name": "punctuation.section.parens.begin.p" },
+        "4": { "name": "meta.invocation.arguments.p", "patterns": [{ "include": "#invocation-args" }] },
+        "5": { "name": "punctuation.section.parens.end.p" }
+      }
+    },
+
+    "invocation-args": {
+      "patterns": [
+        {
+          "match": "([a-zA-Z0-9_-]+)(=)([^,)]*)",
+          "captures": {
+            "1": { "name": "variable.parameter.named.p" },
+            "2": { "name": "keyword.operator.assignment.p" },
+            "3": { "name": "string.unquoted.argument.value.p" }
+          }
+        },
+        {
+          "match": "([^,)]+)",
+          "name": "string.unquoted.argument.positional.p"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.p"
+        }
+      ]
+    },
+
+    "invocation-bare": {
+      "match": "(@)([a-zA-Z0-9_-]+)(\\s+(.*))?$",
+      "captures": {
+        "1": { "name": "punctuation.definition.invocation.p" },
+        "2": { "name": "entity.name.function.invocation.p" },
+        "4": { "name": "string.unquoted.trailing.p" }
+      }
+    },
+
+    "plain-text": {
+      "match": "[^@]+",
+      "name": "string.unquoted.plain.p"
+    }
+  }
+}
