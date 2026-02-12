@@ -217,15 +217,17 @@ type streamInnerEvent struct {
 }
 
 type streamDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	PartialJSON string `json:"partial_json"`
 }
 
 // streamContentBlock represents a content_block_start event's content_block field.
 type streamContentBlock struct {
-	Type string `json:"type"` // "text", "tool_use", "tool_result"
-	Name string `json:"name"` // tool name (for tool_use)
-	ID   string `json:"id"`   // block ID
+	Type    string `json:"type"` // "text", "tool_use", "tool_result"
+	Name    string `json:"name"` // tool name (for tool_use)
+	ID      string `json:"id"`   // block ID
+	Content string `json:"content"`
 }
 
 type streamUsage struct {
@@ -397,6 +399,13 @@ func CallClaudeStreaming(ctx context.Context, prompt string, onMessage func(clus
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+	// Track current block for accumulating tool input/result content.
+	var curBlockType string // "tool_use" or "tool_result"
+	var curBlockID string   // message ID for upsert
+	var curBlockName string // tool name
+	var inputBuf strings.Builder
+	var resultBuf strings.Builder
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -426,32 +435,80 @@ func CallClaudeStreaming(ctx context.Context, prompt string, onMessage func(clus
 		}
 
 		switch inner.Type {
-		case "content_block_delta":
-			if inner.Delta != nil && inner.Delta.Type == "text_delta" && inner.Delta.Text != "" {
-				msgCounter++
-				onMessage(cluster.ConvoMessage{
-					ID:      fmt.Sprintf("msg-%d", msgCounter),
-					Type:    "text",
-					Content: inner.Delta.Text,
-				})
-			}
 		case "content_block_start":
-			if inner.ContentBlock != nil && inner.ContentBlock.Type == "tool_use" {
+			if inner.ContentBlock == nil {
+				continue
+			}
+			switch inner.ContentBlock.Type {
+			case "tool_use":
 				msgCounter++
+				curBlockType = "tool_use"
+				curBlockID = fmt.Sprintf("msg-%d", msgCounter)
+				curBlockName = inner.ContentBlock.Name
+				inputBuf.Reset()
 				onMessage(cluster.ConvoMessage{
-					ID:      fmt.Sprintf("msg-%d", msgCounter),
+					ID:      curBlockID,
 					Type:    "tool_use",
-					Content: inner.ContentBlock.Name,
+					Content: curBlockName,
 				})
-			}
-			if inner.ContentBlock != nil && inner.ContentBlock.Type == "tool_result" {
+			case "tool_result":
 				msgCounter++
+				curBlockType = "tool_result"
+				curBlockID = fmt.Sprintf("msg-%d", msgCounter)
+				curBlockName = ""
+				resultBuf.Reset()
+				if inner.ContentBlock.Content != "" {
+					resultBuf.WriteString(inner.ContentBlock.Content)
+				}
 				onMessage(cluster.ConvoMessage{
-					ID:      fmt.Sprintf("msg-%d", msgCounter),
+					ID:      curBlockID,
 					Type:    "tool_result",
-					Content: inner.ContentBlock.Name,
+					Content: inner.ContentBlock.Content,
+				})
+			default:
+				curBlockType = ""
+			}
+
+		case "content_block_delta":
+			if inner.Delta == nil {
+				continue
+			}
+			switch inner.Delta.Type {
+			case "text_delta":
+				if inner.Delta.Text != "" {
+					msgCounter++
+					onMessage(cluster.ConvoMessage{
+						ID:      fmt.Sprintf("msg-%d", msgCounter),
+						Type:    "text",
+						Content: inner.Delta.Text,
+					})
+				}
+			case "input_json_delta":
+				if curBlockType == "tool_use" && inner.Delta.PartialJSON != "" {
+					inputBuf.WriteString(inner.Delta.PartialJSON)
+				}
+			}
+
+		case "content_block_stop":
+			if curBlockType == "tool_use" && inputBuf.Len() > 0 {
+				detail := toolDetail(curBlockName, inputBuf.String())
+				if detail != "" {
+					onMessage(cluster.ConvoMessage{
+						ID:      curBlockID,
+						Type:    "tool_use",
+						Content: curBlockName,
+						Detail:  detail,
+					})
+				}
+			}
+			if curBlockType == "tool_result" && resultBuf.Len() > 0 {
+				onMessage(cluster.ConvoMessage{
+					ID:      curBlockID,
+					Type:    "tool_result",
+					Content: resultBuf.String(),
 				})
 			}
+			curBlockType = ""
 		}
 	}
 
@@ -460,6 +517,52 @@ func CallClaudeStreaming(ctx context.Context, prompt string, onMessage func(clus
 	}
 
 	return strings.TrimSpace(result), nil
+}
+
+// toolDetail extracts a short summary from tool input JSON for display.
+// e.g. Read → file_path, Bash → command, Write → file_path, Edit → file_path.
+func toolDetail(toolName, inputJSON string) string {
+	var input map[string]interface{}
+	if json.Unmarshal([]byte(inputJSON), &input) != nil {
+		return ""
+	}
+
+	// Pick the most meaningful field based on tool name.
+	keys := map[string][]string{
+		"Read":         {"file_path"},
+		"Write":        {"file_path"},
+		"Edit":         {"file_path"},
+		"Bash":         {"command"},
+		"Glob":         {"pattern"},
+		"Grep":         {"pattern"},
+		"WebFetch":     {"url"},
+		"WebSearch":    {"query"},
+		"NotebookEdit": {"notebook_path"},
+		"Task":         {"prompt"},
+	}
+	if fields, ok := keys[toolName]; ok {
+		for _, f := range fields {
+			if v, ok := input[f]; ok {
+				s := fmt.Sprintf("%v", v)
+				if len(s) > 80 {
+					s = s[:80] + "…"
+				}
+				return s
+			}
+		}
+	}
+
+	// Fallback: try file_path, then command, then first string value.
+	for _, k := range []string{"file_path", "command", "pattern", "query"} {
+		if v, ok := input[k]; ok {
+			s := fmt.Sprintf("%v", v)
+			if len(s) > 80 {
+				s = s[:80] + "…"
+			}
+			return s
+		}
+	}
+	return ""
 }
 
 // callClaudeJSON runs claude -p --output-format json and extracts the result field.

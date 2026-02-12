@@ -49,6 +49,7 @@ type ConvoMessage struct {
 	ID      string `json:"id"`      // unique, e.g. "msg-7"
 	Type    string `json:"type"`    // "text", "tool_use", "tool_result"
 	Content string `json:"content"`
+	Detail  string `json:"detail,omitempty"` // tool args summary, e.g. "BACKLOG.md"
 }
 
 // ClaudeFunc is the signature for invoking claude. It takes a context, a
@@ -145,12 +146,20 @@ func (r *AgentRun) SetLiveIter(ir *IterationResult) {
 }
 
 // AppendLiveMessage appends a message to the live iteration.
+// If a message with the same ID already exists, it updates it in place (upsert).
 func (r *AgentRun) AppendLiveMessage(msg ConvoMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.liveIter != nil {
-		r.liveIter.Messages = append(r.liveIter.Messages, msg)
+	if r.liveIter == nil {
+		return
 	}
+	for i := len(r.liveIter.Messages) - 1; i >= 0; i-- {
+		if r.liveIter.Messages[i].ID == msg.ID {
+			r.liveIter.Messages[i] = msg
+			return
+		}
+	}
+	r.liveIter.Messages = append(r.liveIter.Messages, msg)
 }
 
 // ClearLiveIter clears the live iteration pointer.

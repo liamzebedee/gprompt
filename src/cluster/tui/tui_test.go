@@ -185,7 +185,7 @@ func TestLoopViewTwoColumns(t *testing.T) {
 	}
 }
 
-func TestTwoFocusableRegions(t *testing.T) {
+func TestThreeFocusableRegions(t *testing.T) {
 	mdl := NewModel(nil)
 	mdl.Ready = true
 	mdl.Started = true
@@ -213,10 +213,10 @@ func TestTwoFocusableRegions(t *testing.T) {
 	}
 	find(tree)
 
-	if len(focusable) != 2 {
-		t.Fatalf("expected 2 focusable regions, got %d: %v", len(focusable), focusable)
+	if len(focusable) != 3 {
+		t.Fatalf("expected 3 focusable regions, got %d: %v", len(focusable), focusable)
 	}
-	expected := map[string]bool{focusSidebar: true, focusInput: true}
+	expected := map[string]bool{focusSidebar: true, focusContent: true, focusInput: true}
 	for _, k := range focusable {
 		delete(expected, k)
 	}

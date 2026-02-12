@@ -4,6 +4,8 @@
 
 ## Completed
 
+- [x] Add `todo group-by-tag` command to display items grouped by their tags (alphabetically sorted, multi-tag items appear in each group, untagged items shown last)
+
 - [x] Add `todo duplicate <id>` command to create a new pending copy of an existing item (preserves title, priority, due date, tags, and note)
 
 - [x] Add `todo swap <id1> <id2>` command to swap the position of two items in the list (for manual reordering)

@@ -2815,6 +2815,120 @@ func TestDuplicateIncrementsStoreCount(t *testing.T) {
 	}
 }
 
+// --- GroupByTag tests ---
+
+func TestGroupByTagEmpty(t *testing.T) {
+	s := tempStore(t)
+	groups := s.GroupByTag()
+	if len(groups) != 0 {
+		t.Errorf("expected 0 groups from empty store, got %d", len(groups))
+	}
+}
+
+func TestGroupByTagBasic(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Work task 1", PriorityNone, DueDate{}, []string{"work"})
+	s.AddFullWithTags("Work task 2", PriorityNone, DueDate{}, []string{"work", "urgent"})
+	s.AddFullWithTags("Home task", PriorityNone, DueDate{}, []string{"home"})
+
+	groups := s.GroupByTag()
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 groups (home, urgent, work), got %d", len(groups))
+	}
+	// Groups should be sorted alphabetically by tag.
+	if groups[0].Tag != "home" {
+		t.Errorf("expected first group tag 'home', got %q", groups[0].Tag)
+	}
+	if groups[1].Tag != "urgent" {
+		t.Errorf("expected second group tag 'urgent', got %q", groups[1].Tag)
+	}
+	if groups[2].Tag != "work" {
+		t.Errorf("expected third group tag 'work', got %q", groups[2].Tag)
+	}
+	if len(groups[0].Items) != 1 {
+		t.Errorf("expected 1 item in 'home' group, got %d", len(groups[0].Items))
+	}
+	if len(groups[1].Items) != 1 {
+		t.Errorf("expected 1 item in 'urgent' group, got %d", len(groups[1].Items))
+	}
+	if len(groups[2].Items) != 2 {
+		t.Errorf("expected 2 items in 'work' group, got %d", len(groups[2].Items))
+	}
+}
+
+func TestGroupByTagMultiTagItemAppearsInEachGroup(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Multi-tag task", PriorityNone, DueDate{}, []string{"alpha", "beta"})
+
+	groups := s.GroupByTag()
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	if groups[0].Tag != "alpha" || groups[1].Tag != "beta" {
+		t.Errorf("expected groups [alpha, beta], got [%s, %s]", groups[0].Tag, groups[1].Tag)
+	}
+	if len(groups[0].Items) != 1 || len(groups[1].Items) != 1 {
+		t.Error("expected multi-tag item to appear in both groups")
+	}
+	if groups[0].Items[0].Title != "Multi-tag task" || groups[1].Items[0].Title != "Multi-tag task" {
+		t.Error("expected same item in both groups")
+	}
+}
+
+func TestGroupByTagUntaggedAtEnd(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Untagged task")
+	s.AddFullWithTags("Tagged task", PriorityNone, DueDate{}, []string{"work"})
+
+	groups := s.GroupByTag()
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// Tagged group first, untagged group last.
+	if groups[0].Tag != "work" {
+		t.Errorf("expected first group tag 'work', got %q", groups[0].Tag)
+	}
+	if groups[1].Tag != "" {
+		t.Errorf("expected last group tag '' (untagged), got %q", groups[1].Tag)
+	}
+	if len(groups[1].Items) != 1 || groups[1].Items[0].Title != "Untagged task" {
+		t.Error("expected untagged group to contain 'Untagged task'")
+	}
+}
+
+func TestGroupByTagAllUntagged(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Task A")
+	s.Add("Task B")
+
+	groups := s.GroupByTag()
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group (untagged), got %d", len(groups))
+	}
+	if groups[0].Tag != "" {
+		t.Errorf("expected empty tag for untagged group, got %q", groups[0].Tag)
+	}
+	if len(groups[0].Items) != 2 {
+		t.Errorf("expected 2 items in untagged group, got %d", len(groups[0].Items))
+	}
+}
+
+func TestGroupByTagSortedAlphabetically(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Task Z", PriorityNone, DueDate{}, []string{"zebra"})
+	s.AddFullWithTags("Task A", PriorityNone, DueDate{}, []string{"apple"})
+	s.AddFullWithTags("Task M", PriorityNone, DueDate{}, []string{"mango"})
+
+	groups := s.GroupByTag()
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 groups, got %d", len(groups))
+	}
+	if groups[0].Tag != "apple" || groups[1].Tag != "mango" || groups[2].Tag != "zebra" {
+		t.Errorf("expected alphabetical order [apple, mango, zebra], got [%s, %s, %s]",
+			groups[0].Tag, groups[1].Tag, groups[2].Tag)
+	}
+}
+
 func TestArchiveAllDonePersistence(t *testing.T) {
 	f, err := os.CreateTemp("", "todo-archive-all-*.json")
 	if err != nil {

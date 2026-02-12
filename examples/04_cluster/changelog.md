@@ -1,6 +1,118 @@
 # Changelog
 
-## 1.6.0
+## 2.5.0
+* Add `group-by-tag` command to display items grouped by their tags (`todo group-by-tag`)
+* Add `GroupByTag` method on `Store` that collects items into `TagGroup` slices sorted alphabetically by tag name
+* Items with multiple tags appear in each relevant group; untagged items are collected in a group with an empty tag label at the end
+* CLI renders untagged group with "Untagged" header and uses color-coded labels
+* Add tests for GroupByTag: empty store, basic grouping, multi-tag items, untagged-at-end, all-untagged, alphabetical ordering
+* Update BACKLOG: mark `group-by-tag` command as completed
+
+## 2.4.0 (`3797bf0`)
+* Fix `SetNote` not trimming whitespace — whitespace-only notes were stored as non-empty instead of being treated as cleared, and notes with surrounding spaces kept accidental whitespace (same class of bug as the `Add`/`Edit` whitespace trim fix)
+* Add `Timeline` method on `Store` that groups non-done items by due-date urgency into ordered buckets: Overdue, Today, This Week, Later, and No Due Date
+* Add `TimelineBucket` struct for timeline grouping
+* Add `GroupByTag` method on `Store` that groups items by tag, sorted alphabetically, with multi-tagged items appearing in each relevant group and untagged items collected separately
+* Add `TagGroup` struct for tag-based grouping
+* Add tests for `SetNote` whitespace-only clearing and leading/trailing whitespace trimming
+* Update BUG_BACKLOG: document resolved `SetNote` whitespace trimming bug
+
+## 2.3.1 (`5137ad2`)
+* Fix `Archive` nil-slice bug causing corrupted JSON when all items are archived — `var kept []Item` (nil) replaced with `make([]Item, 0)` so JSON serializes as `"items": []` instead of `"items": null`
+* Same bug pattern as the previously fixed `ClearDone` nil-slice issue (1.3.1)
+* Update BUG_BACKLOG: document resolved Archive nil-slice bug
+
+## 2.3.0 (`f0baaf3`)
+* Add `duplicate` command to clone an existing item as a new pending copy (`todo duplicate <id>`)
+* Add `Duplicate` method on `Store` that copies title, priority, due date, tags, and note while assigning a fresh ID and timestamps
+* Add `bulk-done` command to mark multiple items as done in one atomic operation (`todo bulk-done <id1> <id2> ...`)
+* Add `BulkDone` method on `Store` with duplicate-ID detection and all-or-nothing validation — all IDs are checked before any changes are made
+* Create undo snapshot before duplicating and bulk-done for safe rollback
+* Add tests for duplicate: basic field copying, status reset to pending, not found, independent tag slices, new timestamps, no-tags case, store count increment
+* Add test for archive-all-done persistence: reload after archiving all items succeeds and preserves NextID
+* Update BACKLOG: mark `duplicate` command as completed
+
+## 2.2.1 (`2eced6c`)
+* Fix Export/Import CSV missing `note` column — export→import round-trips silently dropped notes
+* Add `note` as column 7 in CSV format, update `Import` to read it
+* Add tests for note CSV round-trip preservation
+* Add `ListWithTag` tests
+* Update BUG_BACKLOG: document resolved CSV note column bug
+
+## 2.2.0 (`1d9455d`)
+* Add `swap` command to exchange the position of two items in the list for manual reordering (`todo swap <id1> <id2>`)
+* Add `Swap` method on `Store` with validation for same-ID and not-found cases
+* Create undo snapshot before swapping for safe rollback
+* Add `note` column to CSV export/import — notes now survive export→import round-trips
+* Update CSV header from 8 to 9 columns (`id, title, status, priority, due_date, tags, note, created_at, updated_at`)
+* Update `Import` to parse `note` field from column 6 and shift timestamp columns accordingly
+* Add tests for swap: basic position exchange, same-ID rejection, not-found error
+* Add tests for note CSV round-trip: export includes note column, export→import preserves notes
+* Update BACKLOG: mark `swap` command as completed
+* Update BUG_BACKLOG: mark `list --tag` empty tag validation bug as resolved
+
+## 2.1.0 (`f174cbc`)
+* Show tool argument summaries in TUI iteration view — e.g. `Read(BACKLOG.md)`, `Bash(git status)`, `Grep(TODO)`
+* Add `Detail` field to `ConvoMessage` for short tool-input summaries
+* Add `toolDetail` helper to extract meaningful fields (file_path, command, pattern, query, url) from streamed tool input JSON
+* Accumulate `input_json_delta` and `partial_json` during streaming to build complete tool input for summary extraction
+* Change `AppendLiveMessage` to upsert semantics — updates existing messages by ID instead of always appending
+* Refactor iteration view: extract `renderConversation` from `renderIteration` for clearer separation of data lookup and rendering
+* Suppress empty tool results in conversation display instead of showing blank `⎿` lines
+* Handle `content_block_stop` events to finalise tool-use detail and tool-result content via upsert
+* Add semicolon-prefixed comment support (`;`) to parser alongside existing `#` comments
+* Add `TestParseSemicolonComments` for semicolon comment parsing
+* Add `note` command to set, view, or clear a free-text note on an item (`todo note <id> <text>`, `todo note <id> --clear`)
+* Add `Note` field to `Item` struct with JSON serialisation support
+* Add `SetNote` method on `Store` to set or clear a note with `UpdatedAt` tracking
+* Display note in `show` command detail output
+* Create undo snapshot before setting/clearing notes for safe rollback
+* Add `ListWithTag` method on `Store` combining status and tag filtering with validation in a single call
+* Add tests for note: set, clear, not found, persistence, JSON `omitempty` for empty note, undo restore
+* Add tests for ListWithTag: empty tag rejection, status+tag filtering, invalid status rejection, no matches
+* Update BUG_BACKLOG: mark `list --tag` empty tag validation bug as resolved
+
+## 2.0.0 (`108163d`)
+* Add `rename-tag` command to rename a tag across all items (`todo rename-tag <old> <new>`)
+* Add `RenameTag` method on `Store` with normalisation (trim + lowercase), semicolon rejection, same-name check, and deduplication when target tag already exists
+* Create undo snapshot before renaming for safe rollback
+* Add tests for rename-tag: basic rename, deduplication, empty old/new, same name, not found, semicolon rejection, case-insensitive matching
+* Add regression test files for edge cases: priority/status case sensitivity, `HasTag` with empty string, `Overdue` excluding today, sort-by-due stability, tag display consistency
+
+## 1.9.0 (`6fe5764`)
+* Add `archive` command to move completed items to a separate archive file (`todo archive`), preserving history unlike `clear`
+* Add `Archive` method on `Store` that moves done items to a `.archive` JSON file with the same envelope format
+* Add `archiveFile` helper to derive archive path from the main store file
+* Archive appends to existing archive file, preserving previously archived items
+* Sync `NextID` to archive file to prevent ID collisions if archive is ever imported back
+* Create undo snapshot before archiving for safe rollback
+* Add tests for archive: empty store, no done items, moves only done, appends to existing, preserves item data (priority, due date, tags, IDs)
+* Update BACKLOG: mark `archive` command as completed
+
+## 1.8.0 (`711a39b`)
+* Improve iteration message rendering: assemble consecutive text fragments into blocks instead of rendering each message individually
+* Adopt Claude Code-style tool display: `● ToolName` for tool use, `⎿  result` for tool results
+* Add animated braille spinner (`⠋⠙⠹…`) shown while an iteration is still running
+* Add `tickMsg` subscription with 300ms interval to drive spinner animation
+* Add `SpinFrame` field to `Model` for tracking spinner frame index
+* Remove inline duration/timing display from iteration view in favor of cleaner layout
+
+## 1.7.0 (`0f673d9`)
+* Refactor TUI: split monolithic `cluster/tui.go` into `cluster/tui/` subpackage with 6 focused source files
+* Reduce codebase from 17 files (1989 lines) to 6 files (1133 lines) — 43% reduction
+* Simplify focus model to 2 targets (sidebar + input) per spec instead of 3
+* Delete `ContentScroll`/`SidebarState` structs in favor of flat `Model` fields
+* Simplify `AgentView` to empty placeholder per spec ("reserved for future metadata")
+* Redesign `LoopView` as two-column layout (Prompt | Stats) matching spec
+* Change scroll behavior to always `ScrollToBottom` with offset measured as lines from bottom
+* Update `gcluster` main entry point to use new `tui` subpackage
+
+## 1.6.1 (`2272786`)
+* Fix `Upcoming` accepting negative `days` values without error — silently returned empty results instead of rejecting with a validation error
+* Change `Upcoming` return signature to `([]Item, error)` and add input validation for negative days
+* Update BUG_BACKLOG: mark `Upcoming` negative days bug as resolved
+
+## 1.6.0 (`5c56fae`)
 * Add `overdue` command to list non-done items past their due date (`todo overdue`)
 * Add `upcoming` command to list non-done items due today or within N days (`todo upcoming [days]`, default 7)
 * Add `Overdue` and `Upcoming` methods on `Store` for due-date-based item filtering

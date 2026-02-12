@@ -1,0 +1,40 @@
+Claude Code activity rendering reference
+========================================
+
+This is what Claude Code's activity stream looks like in practice.
+Use as reference for how tool_use, tool_result, and text blocks render.
+
+---
+
+● Now use SpinFrame in the view for the progress indicator.
+
+● Update(cluster/tui/view.go)
+  ⎿  Added 4 lines, removed 2 lines
+      291    }
+      292    flush()
+      293
+      294 -  // Progress indicator while iteration is still running
+      294 +  // Animated progress indicator while iteration is still running
+      295    if live && iter.FinishedAt.IsZero() {
+      296 -    items = append(items, node.TextStyled("  ...", 8, 0, 0))
+      296 +    frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+      297 +    f := frames[mdl.SpinFrame%len(frames)]
+      298 +    items = append(items, node.TextStyled("  "+f+" Thinking...", 8, 0, 0))
+      299    }
+      300
+      301    return items
+
+● Bash(go build ./... 2>&1 && go test ./cluster/tui/ -count=1 2>&1)
+  ⎿  ok         p2p/cluster/tui 0.002s
+
+● Done. The ... is now a braille spinner (⠋ Thinking...) that cycles every 300ms via a tick subscription.
+
+---
+
+Key observations:
+- Text blocks start with ● (bullet)
+- Tool use: ● ToolName(args) — bold
+- Tool result: ⎿  summary — indented, dimmed
+- Diff output indented under tool result with +/- line markers
+- Each block separated by blank line
+- Final text block is the assistant's summary

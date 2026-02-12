@@ -86,7 +86,7 @@ func renderSidebar(entries []Entry, sel int, mdl *Model, focused string) node.No
 	ensureVisible(&mdl.SidebarScroll, sel, vis)
 
 	treeCol := node.Column(tree...).WithFlex(1).WithScrollOffset(mdl.SidebarScroll)
-	help := node.TextStyled(" ↑↓ nav  ←→ fold  S-Tab pane  q quit", 8, 0, 0)
+	help := node.TextStyled(" ↑↓ nav  ←→ fold  Tab pane  q quit", 8, 0, 0)
 
 	var all []node.Node
 	all = append(all, header...)
@@ -134,7 +134,7 @@ func renderDetail(entries []Entry, sel int, mdl *Model, focused string) node.Nod
 		inputNode = mdl.PromptInput.Render("❯ ", 0, 0, inputW)
 		hasInput = true
 	case NodeIteration:
-		content = buildIterContent(entry, mdl)
+		content = renderIteration(entry, mdl)
 		mdl.MsgInput.Focused = focused == focusInput
 		inputNode = mdl.MsgInput.Render("❯ ", 0, 0, inputW)
 		hasInput = true
@@ -145,23 +145,21 @@ func renderDetail(entries []Entry, sel int, mdl *Model, focused string) node.Nod
 			node.TextStyled("  ⚠ "+mdl.ErrText, 1, 0, node.Bold))
 	}
 
-	// Always bottom-anchored. Scroll offset = lines from bottom.
-	contentCol := node.Column(content...).WithFlex(1).
-		WithScrollToBottom().WithScrollOffset(mdl.Scroll)
-
-	if !hasInput {
-		return node.Column(
-			node.Box(node.BorderRounded, contentCol).WithFlex(1),
-		).WithFlex(7)
+	// Build the scrollable column. Content + input are both inside the
+	// scroll container so ScrollToBottom keeps the input pinned at bottom
+	// and content scrolls above it (like a normal chat UI).
+	var children []node.Node
+	children = append(children, content...)
+	if hasInput {
+		children = append(children, inputNode.WithKey(focusInput).WithFocusable())
 	}
 
+	scrollCol := node.Column(children...).WithFlex(1).
+		WithScrollToBottom().WithScrollOffset(mdl.Scroll).
+		WithKey(focusContent).WithFocusable()
+
 	return node.Column(
-		node.Box(node.BorderRounded,
-			node.Column(
-				contentCol,
-				inputNode.WithKey(focusInput).WithFocusable(),
-			).WithFlex(1),
-		).WithFlex(1),
+		node.Box(node.BorderRounded, scrollCol).WithFlex(1),
 	).WithFlex(7)
 }
 
@@ -226,15 +224,16 @@ func buildLoopContent(entry Entry, mdl *Model) []node.Node {
 	}
 }
 
-func buildIterContent(entry Entry, mdl *Model) []node.Node {
-	items := []node.Node{
+// renderIteration finds the iteration data and renders its conversation.
+func renderIteration(entry Entry, mdl *Model) []node.Node {
+	header := []node.Node{
 		node.TextStyled(fmt.Sprintf("  %s — iteration %d", entry.Agent, entry.Iter), 0, 0, node.Bold|node.Underline),
 		node.Text(""),
 	}
 
 	run, ok := mdl.Runs[entry.Agent]
 	if !ok {
-		return append(items, node.Text("  No run data available."))
+		return append(header, node.Text("  No run data available."))
 	}
 
 	var iter *cluster.IterationResult
@@ -250,53 +249,71 @@ func buildIterContent(entry Entry, mdl *Model) []node.Node {
 		}
 	}
 	if iter == nil {
-		return append(items, node.Text("  Iteration not found."))
+		return append(header, node.Text("  Iteration not found."))
 	}
 
 	if iter.Error != "" {
-		items = append(items, node.TextStyled("  Error: "+iter.Error, 1, 0, node.Bold), node.Text(""))
+		header = append(header, node.TextStyled("  Error: "+iter.Error, 1, 0, node.Bold), node.Text(""))
 	}
 
-	// Assemble consecutive text fragments into blocks, separated by tool events.
-	// Renders like Claude Code: ● text block, ● Tool(name), ⎿  result
+	items := renderConversation(iter.Messages)
+	result := append(header, items...)
+
+	if live && iter.FinishedAt.IsZero() {
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		result = append(result, node.Text(""),
+			node.TextStyled("  "+frames[mdl.SpinFrame%len(frames)]+" Thinking...", 8, 0, 0))
+	}
+
+	return result
+}
+
+// renderConversation turns a stream of ConvoMessages into display nodes.
+// Consecutive text deltas are assembled into blocks. Each block gets a ● bullet.
+// Tool use gets its own styled line. Tool results with content get ⎿ lines.
+func renderConversation(msgs []cluster.ConvoMessage) []node.Node {
+	var items []node.Node
 	var textBuf strings.Builder
+
 	flush := func() {
-		if textBuf.Len() == 0 {
+		text := strings.TrimSpace(textBuf.String())
+		textBuf.Reset()
+		if text == "" {
 			return
 		}
-		for _, line := range strings.Split(strings.TrimRight(textBuf.String(), "\n"), "\n") {
-			items = append(items, node.Text("  "+line))
+		lines := strings.Split(text, "\n")
+		// First line gets bullet
+		items = append(items, node.Text("  ● "+lines[0]))
+		for _, line := range lines[1:] {
+			items = append(items, node.Text("    "+line))
 		}
 		items = append(items, node.Text(""))
-		textBuf.Reset()
 	}
 
-	for _, msg := range iter.Messages {
+	for _, msg := range msgs {
 		switch msg.Type {
 		case "text":
 			textBuf.WriteString(msg.Content)
 		case "tool_use":
 			flush()
-			items = append(items,
-				node.TextStyled(fmt.Sprintf("  ● %s", msg.Content), 33, 0, node.Bold))
-		case "tool_result":
-			c := msg.Content
-			if len(c) > 200 {
-				c = c[:200] + "…"
+			label := msg.Content
+			if msg.Detail != "" {
+				label = fmt.Sprintf("%s(%s)", msg.Content, msg.Detail)
 			}
 			items = append(items,
-				node.TextStyled("    ⎿  "+c, 8, 0, 0),
-				node.Text(""))
+				node.TextStyled(fmt.Sprintf("  ● %s", label), 33, 0, node.Bold))
+		case "tool_result":
+			if c := strings.TrimSpace(msg.Content); c != "" {
+				if len(c) > 200 {
+					c = c[:200] + "…"
+				}
+				items = append(items,
+					node.TextStyled("    ⎿  "+c, 8, 0, 0),
+					node.Text(""))
+			}
 		}
 	}
 	flush()
-
-	// Animated progress indicator while iteration is still running
-	if live && iter.FinishedAt.IsZero() {
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		f := frames[mdl.SpinFrame%len(frames)]
-		items = append(items, node.TextStyled("  "+f+" Thinking...", 8, 0, 0))
-	}
 
 	return items
 }

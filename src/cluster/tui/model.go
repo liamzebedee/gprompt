@@ -46,6 +46,7 @@ type tickMsg struct{}
 
 const (
 	focusSidebar = "sidebar"
+	focusContent = "content"
 	focusInput   = "input"
 )
 

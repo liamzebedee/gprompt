@@ -43,6 +43,8 @@ Commands:
   sort <field>        Sort items by: priority, due, status, created
   duplicate <id>      Duplicate an item as a new pending copy
   swap <id1> <id2>    Swap the position of two items in the list
+  timeline            Show items grouped by due-date urgency
+  group-by-tag        Show items grouped by tag
   archive             Move completed items to an archive file
   clear               Remove all completed items
   undo                Revert the last change
@@ -630,6 +632,38 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Duplicated #%d → #%d: %s\n", id, dup.ID, dup.Title)
+
+	case "timeline":
+		buckets := store.Timeline()
+		if len(buckets) == 0 {
+			fmt.Println("No active items.")
+			return
+		}
+		for i, bucket := range buckets {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("%s\n", todo.ColorLabel(bucket.Label, color))
+			printItems(bucket.Items, color)
+		}
+
+	case "group-by-tag":
+		groups := store.GroupByTag()
+		if len(groups) == 0 {
+			fmt.Println("No items.")
+			return
+		}
+		for i, group := range groups {
+			if i > 0 {
+				fmt.Println()
+			}
+			label := group.Tag
+			if label == "" {
+				label = "Untagged"
+			}
+			fmt.Printf("%s\n", todo.ColorLabel(label, color))
+			printItems(group.Items, color)
+		}
 
 	case "archive":
 		if err := store.Snapshot(); err != nil {

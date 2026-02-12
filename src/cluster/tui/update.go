@@ -42,6 +42,13 @@ func tuiUpdate(m interface{}, msg app.Msg) app.UpdateResult {
 
 	case app.KeyMsg:
 		return handleKey(mdl, msg)
+
+	case app.ScrollMsg:
+		mdl.Scroll += msg.Delta
+		if mdl.Scroll < 0 {
+			mdl.Scroll = 0
+		}
+		return app.NoCmd(mdl)
 	}
 
 	if !mdl.Started {
@@ -65,6 +72,8 @@ func handleKey(mdl *Model, msg app.KeyMsg) app.UpdateResult {
 		return handleInputKey(mdl, msg, entries, sel)
 	case focusSidebar:
 		return handleSidebarKey(mdl, msg, entries, sel)
+	case focusContent:
+		return handleContentKey(mdl, msg)
 	}
 	if msg.Key.Type == input.RuneKey && msg.Key.Rune == 'q' {
 		return app.UpdateResult{Model: nil}
@@ -118,6 +127,47 @@ func handleSidebarKey(mdl *Model, msg app.KeyMsg, entries []Entry, sel int) app.
 			k := expandKey(entries[sel])
 			mdl.Expanded[k] = !isExpanded(mdl.Expanded, k)
 		}
+	case input.PageUp:
+		mdl.Scroll += 10
+	case input.PageDown:
+		mdl.Scroll -= 10
+		if mdl.Scroll < 0 {
+			mdl.Scroll = 0
+		}
+	}
+	return app.NoCmd(mdl)
+}
+
+func handleContentKey(mdl *Model, msg app.KeyMsg) app.UpdateResult {
+	scroll := func(delta int) {
+		mdl.Scroll += delta
+		if mdl.Scroll < 0 {
+			mdl.Scroll = 0
+		}
+	}
+
+	switch msg.Key.Type {
+	case input.RuneKey:
+		switch msg.Key.Rune {
+		case 'q':
+			return app.UpdateResult{Model: nil}
+		case 'k':
+			scroll(1)
+		case 'j':
+			scroll(-1)
+		case 'G':
+			mdl.Scroll = 0 // bottom
+		case 'g':
+			mdl.Scroll = 99999 // top
+		}
+	case input.Up:
+		scroll(1)
+	case input.Down:
+		scroll(-1)
+	case input.PageUp:
+		scroll(10)
+	case input.PageDown:
+		scroll(-10)
 	}
 	return app.NoCmd(mdl)
 }
