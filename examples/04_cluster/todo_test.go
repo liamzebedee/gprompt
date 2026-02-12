@@ -2090,6 +2090,142 @@ func TestImportRoundTripPreservesTimestamps(t *testing.T) {
 	}
 }
 
+func TestOverdueEmpty(t *testing.T) {
+	s := tempStore(t)
+	items := s.Overdue()
+	if len(items) != 0 {
+		t.Errorf("expected 0 overdue items, got %d", len(items))
+	}
+}
+
+func TestOverdueReturnsOnlyPastDueNonDone(t *testing.T) {
+	s := tempStore(t)
+	yesterday := time.Now().AddDate(0, 0, -1)
+	tomorrow := time.Now().AddDate(0, 0, 1)
+	today := time.Now()
+
+	// Overdue item (pending, due yesterday)
+	s.AddFull("Overdue task", PriorityNone, DueDate{Time: yesterday, Valid: true})
+	// Not overdue (pending, due tomorrow)
+	s.AddFull("Future task", PriorityNone, DueDate{Time: tomorrow, Valid: true})
+	// Not overdue (pending, due today)
+	s.AddFull("Today task", PriorityNone, DueDate{Time: today, Valid: true})
+	// No due date
+	s.Add("No due date")
+	// Overdue but done — should be excluded
+	s.AddFull("Done overdue", PriorityNone, DueDate{Time: yesterday, Valid: true})
+	s.SetStatus(5, StatusDone)
+
+	items := s.Overdue()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 overdue item, got %d", len(items))
+	}
+	if items[0].Title != "Overdue task" {
+		t.Errorf("expected 'Overdue task', got %q", items[0].Title)
+	}
+}
+
+func TestOverdueIncludesInProgress(t *testing.T) {
+	s := tempStore(t)
+	yesterday := time.Now().AddDate(0, 0, -1)
+	s.AddFull("Overdue in-progress", PriorityNone, DueDate{Time: yesterday, Valid: true})
+	s.SetStatus(1, StatusInProgress)
+
+	items := s.Overdue()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 overdue item, got %d", len(items))
+	}
+}
+
+func TestUpcomingDefaultSevenDays(t *testing.T) {
+	s := tempStore(t)
+	today := time.Now()
+	inThreeDays := time.Now().AddDate(0, 0, 3)
+	inTenDays := time.Now().AddDate(0, 0, 10)
+	yesterday := time.Now().AddDate(0, 0, -1)
+
+	s.AddFull("Due today", PriorityNone, DueDate{Time: today, Valid: true})
+	s.AddFull("Due in 3 days", PriorityNone, DueDate{Time: inThreeDays, Valid: true})
+	s.AddFull("Due in 10 days", PriorityNone, DueDate{Time: inTenDays, Valid: true})
+	s.AddFull("Overdue yesterday", PriorityNone, DueDate{Time: yesterday, Valid: true})
+	s.Add("No due date")
+
+	items, err := s.Upcoming(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 upcoming items (today + 3 days), got %d", len(items))
+	}
+	titles := map[string]bool{}
+	for _, it := range items {
+		titles[it.Title] = true
+	}
+	if !titles["Due today"] || !titles["Due in 3 days"] {
+		t.Errorf("expected 'Due today' and 'Due in 3 days', got %v", titles)
+	}
+}
+
+func TestUpcomingZeroDaysMeansTodayOnly(t *testing.T) {
+	s := tempStore(t)
+	today := time.Now()
+	tomorrow := time.Now().AddDate(0, 0, 1)
+
+	s.AddFull("Due today", PriorityNone, DueDate{Time: today, Valid: true})
+	s.AddFull("Due tomorrow", PriorityNone, DueDate{Time: tomorrow, Valid: true})
+
+	items, err := s.Upcoming(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item due today, got %d", len(items))
+	}
+	if items[0].Title != "Due today" {
+		t.Errorf("expected 'Due today', got %q", items[0].Title)
+	}
+}
+
+func TestUpcomingExcludesDone(t *testing.T) {
+	s := tempStore(t)
+	today := time.Now()
+	s.AddFull("Done today", PriorityNone, DueDate{Time: today, Valid: true})
+	s.SetStatus(1, StatusDone)
+
+	items, err := s.Upcoming(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 upcoming items (done excluded), got %d", len(items))
+	}
+}
+
+func TestUpcomingEmpty(t *testing.T) {
+	s := tempStore(t)
+	items, err := s.Upcoming(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 upcoming items, got %d", len(items))
+	}
+}
+
+func TestUpcomingRejectsNegativeDays(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2099-01-01")
+	s.AddFull("Future task", PriorityNone, due)
+
+	_, err := s.Upcoming(-1)
+	if err == nil {
+		t.Fatal("expected error for negative days value, got nil")
+	}
+	if !strings.Contains(err.Error(), "negative") {
+		t.Errorf("expected error to mention 'negative', got: %v", err)
+	}
+}
+
 func TestUndoRestoresTags(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })

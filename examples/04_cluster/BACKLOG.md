@@ -6,6 +6,8 @@
 
 ## Completed
 
+- [x] Add `todo overdue` and `todo upcoming [days]` commands to filter items by due date urgency
+
 - [x] Add `todo show <id>` command to display detailed information about a single item
 
 - [x] Add `todo import <file.csv>` command to import items from CSV (round-trips with export)

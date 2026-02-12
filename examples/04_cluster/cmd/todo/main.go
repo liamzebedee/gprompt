@@ -34,6 +34,8 @@ Commands:
   untag <id> <tag>    Remove a tag from an item
   search <query>      Search items by title substring
   stats               Show counts by status
+  overdue             List items that are past their due date
+  upcoming [days]     List items due today or within N days (default: 7)
   sort <field>        Sort items by: priority, due, status, created
   clear               Remove all completed items
   undo                Revert the last change
@@ -409,6 +411,45 @@ func main() {
 		} else {
 			fmt.Printf("Cleared due date on #%d.\n", id)
 		}
+
+	case "overdue":
+		items := store.Overdue()
+		if len(items) == 0 {
+			fmt.Println("No overdue items.")
+			return
+		}
+		fmt.Printf("%d overdue item(s):\n", len(items))
+		printItems(items, color)
+
+	case "upcoming":
+		days := 7
+		if len(os.Args) >= 3 {
+			d, err := strconv.Atoi(os.Args[2])
+			if err != nil || d < 0 {
+				fmt.Fprintf(os.Stderr, "Invalid days value: %s (must be a non-negative integer)\n", os.Args[2])
+				os.Exit(1)
+			}
+			days = d
+		}
+		items, err := store.Upcoming(days)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if len(items) == 0 {
+			if days == 0 {
+				fmt.Println("No items due today.")
+			} else {
+				fmt.Printf("No items due within the next %d day(s).\n", days)
+			}
+			return
+		}
+		if days == 0 {
+			fmt.Printf("%d item(s) due today:\n", len(items))
+		} else {
+			fmt.Printf("%d item(s) due within the next %d day(s):\n", len(items), days)
+		}
+		printItems(items, color)
 
 	case "sort":
 		if len(os.Args) < 3 {

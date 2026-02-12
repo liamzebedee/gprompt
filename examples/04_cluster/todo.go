@@ -727,7 +727,11 @@ func (s *Store) Overdue() []Item {
 
 // Upcoming returns all non-done items whose due date is today or within the next `days` days.
 // Items with no due date are excluded. A days value of 0 means today only.
-func (s *Store) Upcoming(days int) []Item {
+// Returns an error if days is negative.
+func (s *Store) Upcoming(days int) ([]Item, error) {
+	if days < 0 {
+		return nil, fmt.Errorf("days must not be negative: %d", days)
+	}
 	today := time.Now().Truncate(24 * time.Hour)
 	horizon := today.AddDate(0, 0, days)
 	var result []Item
@@ -740,7 +744,7 @@ func (s *Store) Upcoming(days int) []Item {
 			result = append(result, item)
 		}
 	}
-	return result
+	return result, nil
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.
