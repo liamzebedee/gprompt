@@ -927,6 +927,116 @@ func TestAddWithPriorityRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestClearDoneEmpty(t *testing.T) {
+	s := tempStore(t)
+	removed := s.ClearDone()
+	if removed != 0 {
+		t.Errorf("expected 0 removed from empty store, got %d", removed)
+	}
+	if len(s.Items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(s.Items))
+	}
+}
+
+func TestClearDoneRemovesOnlyDone(t *testing.T) {
+	s := tempStore(t)
+	item1, _ := s.Add("Pending task")
+	item2, _ := s.Add("Done task")
+	item3, _ := s.Add("In-progress task")
+	_ = s.SetStatus(item2.ID, StatusDone)
+	_ = s.SetStatus(item3.ID, StatusInProgress)
+
+	removed := s.ClearDone()
+	if removed != 1 {
+		t.Errorf("expected 1 removed, got %d", removed)
+	}
+	if len(s.Items) != 2 {
+		t.Errorf("expected 2 items remaining, got %d", len(s.Items))
+	}
+	// Verify the right items remain.
+	for _, item := range s.Items {
+		if item.ID == item2.ID {
+			t.Error("done item should have been removed")
+		}
+	}
+	_, err := s.Get(item1.ID)
+	if err != nil {
+		t.Error("pending item should still exist")
+	}
+	_, err = s.Get(item3.ID)
+	if err != nil {
+		t.Error("in-progress item should still exist")
+	}
+}
+
+func TestClearDoneAllDone(t *testing.T) {
+	s := tempStore(t)
+	item1, _ := s.Add("Task A")
+	item2, _ := s.Add("Task B")
+	_ = s.SetStatus(item1.ID, StatusDone)
+	_ = s.SetStatus(item2.ID, StatusDone)
+
+	removed := s.ClearDone()
+	if removed != 2 {
+		t.Errorf("expected 2 removed, got %d", removed)
+	}
+	if len(s.Items) != 0 {
+		t.Errorf("expected 0 items remaining, got %d", len(s.Items))
+	}
+}
+
+func TestClearDoneNoneDone(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Pending A")
+	s.Add("Pending B")
+
+	removed := s.ClearDone()
+	if removed != 0 {
+		t.Errorf("expected 0 removed, got %d", removed)
+	}
+	if len(s.Items) != 2 {
+		t.Errorf("expected 2 items remaining, got %d", len(s.Items))
+	}
+}
+
+func TestAddTrimsWhitespace(t *testing.T) {
+	s := tempStore(t)
+
+	item, err := s.Add("  hello world  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "hello world" {
+		t.Errorf("expected trimmed title 'hello world', got %q", item.Title)
+	}
+}
+
+func TestAddFullTrimsWhitespace(t *testing.T) {
+	s := tempStore(t)
+
+	item, err := s.AddFull("\t Buy milk \n", PriorityHigh, DueDate{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "Buy milk" {
+		t.Errorf("expected trimmed title 'Buy milk', got %q", item.Title)
+	}
+}
+
+func TestEditTrimsWhitespace(t *testing.T) {
+	s := tempStore(t)
+
+	item, _ := s.Add("Original")
+	if err := s.Edit(item.ID, "  Updated title  "); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := s.Get(item.ID)
+	if got.Title != "Updated title" {
+		t.Errorf("expected trimmed title 'Updated title', got %q", got.Title)
+	}
+}
+
 func TestPriorityPersistence(t *testing.T) {
 	f, err := os.CreateTemp("", "todo-*.json")
 	if err != nil {

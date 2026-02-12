@@ -183,7 +183,8 @@ func (s *Store) AddWithPriority(title string, priority Priority) (Item, error) {
 
 // AddFull creates a new item with the given title, priority, and optional due date.
 func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, error) {
-	if strings.TrimSpace(title) == "" {
+	title = strings.TrimSpace(title)
+	if title == "" {
 		return Item{}, fmt.Errorf("title must not be empty")
 	}
 	if !ValidPriority(priority) {
@@ -238,7 +239,8 @@ func (s *Store) SetStatus(id int, status Status) error {
 
 // Edit updates the title of an existing item.
 func (s *Store) Edit(id int, newTitle string) error {
-	if strings.TrimSpace(newTitle) == "" {
+	newTitle = strings.TrimSpace(newTitle)
+	if newTitle == "" {
 		return fmt.Errorf("title must not be empty")
 	}
 	item, err := s.Get(id)
@@ -341,6 +343,21 @@ func (s *Store) Export(w io.Writer) error {
 	}
 
 	return cw.Error()
+}
+
+// ClearDone removes all items with StatusDone and returns the number removed.
+func (s *Store) ClearDone() int {
+	var kept []Item
+	removed := 0
+	for _, item := range s.Items {
+		if item.Status == StatusDone {
+			removed++
+		} else {
+			kept = append(kept, item)
+		}
+	}
+	s.Items = kept
+	return removed
 }
 
 func (s *Store) List(filter Status) ([]Item, error) {

@@ -29,6 +29,7 @@ Commands:
                       Set or clear an item's due date
   search <query>      Search items by title substring
   stats               Show counts by status
+  clear               Remove all completed items
   export              Output all items as CSV
   help                Show this message
 `, todo.DefaultFile)
@@ -280,6 +281,18 @@ func main() {
 			fmt.Printf("Set #%d due date to %s.\n", id, due)
 		} else {
 			fmt.Printf("Cleared due date on #%d.\n", id)
+		}
+
+	case "clear":
+		removed := store.ClearDone()
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		if removed == 0 {
+			fmt.Println("No completed items to clear.")
+		} else {
+			fmt.Printf("Cleared %d completed item(s).\n", removed)
 		}
 
 	case "export":

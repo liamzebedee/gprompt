@@ -2,6 +2,8 @@
 
 ## Open
 
+- [ ] `Add` and `Edit` do not trim leading/trailing whitespace from titles — stored as-is with accidental spaces
+
 ## Resolved
 
 - [x] Empty or whitespace-only titles accepted by `add` and `edit` — should reject with error

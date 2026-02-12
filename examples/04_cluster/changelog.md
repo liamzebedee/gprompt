@@ -1,6 +1,30 @@
 # Changelog
 
-## 0.7.0 (`uncommitted`)
+## 1.0.1 (`d4abdc5`)
+* Mark `AddFull`/`AddWithPriority` invalid-priority bug as resolved in BUG_BACKLOG
+
+## 1.0.0 (`0944c35`)
+* Add `ColorDueDate` helper — overdue dates shown in red+bold, today in yellow
+* Validate priority in `AddFull` — reject invalid priority values with descriptive error
+* Add tests for `AddFull` and `AddWithPriority` rejecting invalid priorities
+* Fix unchecked `(Item, error)` return values across test suite
+
+## 0.9.0 (`1f9bb11`)
+* Validate titles in `Add`, `AddWithPriority`, `AddFull`, and `Edit` — reject empty or whitespace-only strings
+* Change `Add`, `AddWithPriority`, and `AddFull` return signatures to `(Item, error)` for validation support
+* Add tests for `ParseDueDate` (valid, empty, invalid inputs)
+* Add tests for empty/whitespace-only title rejection in `AddFull` and `Edit`
+* Add tests for `AddFull` with due date, `SetDueDate` (set, clear, not found), due date persistence, and due date JSON round-trip
+
+## 0.8.0 (`4ace21a`)
+* Refactor `add` command flag parsing to accept `--priority` and `--due` flags in any order
+* Switch `add` command from `AddWithPriority` to `AddFull` to support setting priority and due date together
+* Improve `add` output to display both priority and due date when present
+* Add `due` command to set or clear an item's due date (`todo due <id> <YYYY-MM-DD|none>`)
+* Add `DUE` column to `list` and `search` table output
+* Add `ColorDueDate` helper — overdue dates shown in red+bold, today in yellow
+
+## 0.7.0 (`3542b0c`)
 * Add `DueDate` field to items with `YYYY-MM-DD` format and JSON serialisation support
 * Add `--due` flag to `add` command for setting a due date at creation time
 * Add `AddFull` method on `Store` for creating items with title, priority, and due date

@@ -2,11 +2,11 @@
 
 ## Pending
 
-- [ ] Add color-coded output for different statuses
-- [ ] Add `todo stats` command showing counts by status
-- [ ] Support multiple todo files with `--file` flag
+(none currently)
 
 ## Completed
+
+- [x] Add `todo clear` command to bulk-remove all completed items
 
 - [x] Basic CRUD operations (add, list, done, start, delete)
 - [x] JSON file persistence
@@ -16,3 +16,6 @@
 - [x] Add `todo export` to output items as CSV
 - [x] Add priority levels (low, medium, high) with `todo add --priority high "Task"`
 - [x] Add due dates to todo items with `todo add --due 2025-03-01 "Task"`
+- [x] Add color-coded output for different statuses
+- [x] Add `todo stats` command showing counts by status
+- [x] Support multiple todo files with `--file` flag
