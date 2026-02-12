@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `Archive` produces nil `Items` slice when all items are archived — causes `Save` to write `"items": null`, which fails on subsequent `Load` (same class of bug as the `ClearDone` nil-slice fix)
+
 - [x] `Export`/`Import` CSV missing `note` column — export→import round-trip silently drops notes added via `SetNote`
 
 - [x] `list --tag` accepts empty or whitespace-only tag filter without validation — silently returns no items instead of rejecting with an error like `ListByTag` and other validated inputs

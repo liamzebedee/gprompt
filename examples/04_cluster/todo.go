@@ -846,7 +846,7 @@ func (s *Store) archiveFile() string {
 func (s *Store) Archive() (int, error) {
 	// Collect done items.
 	var archived []Item
-	var kept []Item
+	kept := make([]Item, 0, len(s.Items))
 	for _, item := range s.Items {
 		if item.Status == StatusDone {
 			archived = append(archived, item)
