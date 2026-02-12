@@ -899,6 +899,9 @@ func (s *Store) Swap(id1, id2 int) error {
 	if idx2 == -1 {
 		return fmt.Errorf("todo #%d not found", id2)
 	}
+	now := time.Now()
+	s.Items[idx1].UpdatedAt = now
+	s.Items[idx2].UpdatedAt = now
 	s.Items[idx1], s.Items[idx2] = s.Items[idx2], s.Items[idx1]
 	return nil
 }
@@ -1063,6 +1066,44 @@ func (s *Store) GroupByTag() []TagGroup {
 		groups = append(groups, TagGroup{Tag: "", Items: untagged})
 	}
 	return groups
+}
+
+// Move repositions an item to the given 1-based position in the list.
+// Other items shift to accommodate the move. The position is clamped to
+// the valid range [1, len(Items)].
+func (s *Store) Move(id int, position int) error {
+	if len(s.Items) == 0 {
+		return fmt.Errorf("todo #%d not found", id)
+	}
+	if position < 1 {
+		return fmt.Errorf("position must be at least 1, got %d", position)
+	}
+	// Find the item's current index.
+	srcIdx := -1
+	for i := range s.Items {
+		if s.Items[i].ID == id {
+			srcIdx = i
+			break
+		}
+	}
+	if srcIdx == -1 {
+		return fmt.Errorf("todo #%d not found", id)
+	}
+	// Clamp position to valid range.
+	dstIdx := position - 1 // convert to 0-based
+	if dstIdx >= len(s.Items) {
+		dstIdx = len(s.Items) - 1
+	}
+	if srcIdx == dstIdx {
+		return nil // already in position
+	}
+	// Remove from source and insert at destination.
+	item := s.Items[srcIdx]
+	// Remove
+	s.Items = append(s.Items[:srcIdx], s.Items[srcIdx+1:]...)
+	// Insert at dstIdx
+	s.Items = append(s.Items[:dstIdx], append([]Item{item}, s.Items[dstIdx:]...)...)
+	return nil
 }
 
 // FormatTags returns a comma-separated string of tags, or "-" if empty.

@@ -2649,6 +2649,33 @@ func TestSwap(t *testing.T) {
 	}
 }
 
+func TestSwapUpdatesTimestamps(t *testing.T) {
+	s := tempStore(t)
+	a, _ := s.Add("First")
+	b, _ := s.Add("Second")
+
+	// Record the original UpdatedAt timestamps.
+	origA := a.UpdatedAt
+	origB := b.UpdatedAt
+
+	// Sleep briefly so time.Now() produces a different timestamp.
+	time.Sleep(10 * time.Millisecond)
+
+	if err := s.Swap(a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	gotA, _ := s.Get(a.ID)
+	gotB, _ := s.Get(b.ID)
+
+	if !gotA.UpdatedAt.After(origA) {
+		t.Errorf("expected #%d UpdatedAt to advance after Swap, got %v (was %v)", a.ID, gotA.UpdatedAt, origA)
+	}
+	if !gotB.UpdatedAt.After(origB) {
+		t.Errorf("expected #%d UpdatedAt to advance after Swap, got %v (was %v)", b.ID, gotB.UpdatedAt, origB)
+	}
+}
+
 func TestSwapSameID(t *testing.T) {
 	s := tempStore(t)
 	item, _ := s.Add("Only")
@@ -2972,5 +2999,77 @@ func TestArchiveAllDonePersistence(t *testing.T) {
 	newItem, _ := s2.Add("Task C")
 	if newItem.ID <= item2.ID {
 		t.Errorf("expected new ID > %d, got %d", item2.ID, newItem.ID)
+	}
+}
+
+func TestMove(t *testing.T) {
+	s := tempStore(t)
+	a, _ := s.Add("A")
+	b, _ := s.Add("B")
+	c, _ := s.Add("C")
+	d, _ := s.Add("D")
+
+	// Move C to position 1 (front).
+	if err := s.Move(c.ID, 1); err != nil {
+		t.Fatalf("Move failed: %v", err)
+	}
+	if s.Items[0].ID != c.ID {
+		t.Errorf("expected C at pos 0, got #%d", s.Items[0].ID)
+	}
+	if s.Items[1].ID != a.ID {
+		t.Errorf("expected A at pos 1, got #%d", s.Items[1].ID)
+	}
+	if s.Items[2].ID != b.ID {
+		t.Errorf("expected B at pos 2, got #%d", s.Items[2].ID)
+	}
+	if s.Items[3].ID != d.ID {
+		t.Errorf("expected D at pos 3, got #%d", s.Items[3].ID)
+	}
+
+	// Move C to the end (position >= len).
+	if err := s.Move(c.ID, 100); err != nil {
+		t.Fatalf("Move to end failed: %v", err)
+	}
+	if s.Items[3].ID != c.ID {
+		t.Errorf("expected C at last position, got #%d", s.Items[3].ID)
+	}
+
+	// Move item to its own position (no-op).
+	order := make([]int, len(s.Items))
+	for i, it := range s.Items {
+		order[i] = it.ID
+	}
+	if err := s.Move(a.ID, 1); err != nil {
+		t.Fatalf("Move no-op failed: %v", err)
+	}
+	for i, it := range s.Items {
+		if it.ID != order[i] {
+			t.Errorf("no-op move changed order at pos %d: expected #%d, got #%d", i, order[i], it.ID)
+		}
+	}
+}
+
+func TestMoveErrors(t *testing.T) {
+	s := tempStore(t)
+	s.Add("A")
+
+	// Non-existent ID.
+	if err := s.Move(999, 1); err == nil {
+		t.Error("expected error for non-existent ID")
+	}
+
+	// Position < 1.
+	if err := s.Move(1, 0); err == nil {
+		t.Error("expected error for position < 1")
+	}
+	if err := s.Move(1, -5); err == nil {
+		t.Error("expected error for negative position")
+	}
+}
+
+func TestMoveEmptyStore(t *testing.T) {
+	s := tempStore(t)
+	if err := s.Move(1, 1); err == nil {
+		t.Error("expected error when store is empty")
 	}
 }

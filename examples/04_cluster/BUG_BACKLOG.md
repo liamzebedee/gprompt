@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `Swap` does not update `UpdatedAt` timestamps on swapped items — every other mutation operation (`Edit`, `SetNote`, `SetStatus`, `SetPriority`, `SetDueDate`, `AddTag`, `RemoveTag`, `RenameTag`, `BulkDone`) updates `UpdatedAt`, but `Swap` silently changes item positions without recording when the change occurred
+
 - [x] `SetNote` does not trim leading/trailing whitespace — whitespace-only notes are stored as non-empty instead of being treated as cleared, and notes with surrounding spaces keep the accidental whitespace (same class of bug as the `Add`/`Edit` whitespace trim fix)
 
 - [x] `Archive` produces nil `Items` slice when all items are archived — causes `Save` to write `"items": null`, which fails on subsequent `Load` (same class of bug as the `ClearDone` nil-slice fix)
