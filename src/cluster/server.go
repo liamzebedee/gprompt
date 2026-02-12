@@ -290,6 +290,8 @@ func (s *Server) handleSteerSubscribe(conn net.Conn) {
 		}
 		if env.Type == MsgSteerInject {
 			s.handleSteerInject(&env)
+		} else if env.Type == MsgSteerEditPrompt {
+			s.handleSteerEditPrompt(&env)
 		}
 	}
 
@@ -319,6 +321,39 @@ func (s *Server) handleSteerInject(env *Envelope) {
 	if err := s.executor.InjectMessage(req.AgentName, req.Message); err != nil {
 		log.Printf("steer inject: forward to executor failed: %v", err)
 	}
+}
+
+// handleSteerEditPrompt updates a cached method body and notifies the executor.
+// The next steer_state push will include the updated Methods map, and the
+// executor will use the new body from the next loop iteration onward.
+// This allows steer clients to permanently modify an agent's prompt at runtime.
+func (s *Server) handleSteerEditPrompt(env *Envelope) {
+	var req SteerEditPromptRequest
+	if err := env.DecodePayload(&req); err != nil {
+		log.Printf("steer_edit_prompt decode error: %v", err)
+		return
+	}
+	log.Printf("steer edit_prompt: agent=%s method=%s (%d bytes)", req.AgentName, req.MethodName, len(req.NewBody))
+
+	// Update the server's cached method body — this is the source of truth
+	// for method bodies. When agents restart, StartPending uses this cache.
+	s.mu.Lock()
+	methods, ok := s.agentMethods[req.AgentName]
+	if !ok {
+		methods = make(map[string]string)
+		s.agentMethods[req.AgentName] = methods
+	}
+	methods[req.MethodName] = req.NewBody
+	s.mu.Unlock()
+
+	// Tell the executor to use the new body for subsequent iterations.
+	if s.executor != nil {
+		s.executor.UpdateMethodBody(req.AgentName, req.MethodName, req.NewBody)
+	}
+
+	// Push updated state so all steer clients see the change reflected.
+	objects := s.store.ListAgents()
+	s.pushState(objects)
 }
 
 // pushState sends the current cluster state to all subscribed steer clients.

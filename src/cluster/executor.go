@@ -62,6 +62,14 @@ type IterationResult struct {
 	Error string `json:"error,omitempty"`
 }
 
+// methodUpdate carries a method body update from a steer client to a running
+// agent's loop goroutine. The agent drains these between iterations and replaces
+// its base prompt so all future iterations use the new text.
+type methodUpdate struct {
+	MethodName string
+	NewBody    string
+}
+
 // AgentRun holds the runtime state for a single executing agent.
 // It is created when an agent starts and removed when it stops.
 type AgentRun struct {
@@ -79,6 +87,11 @@ type AgentRun struct {
 	// goroutine drains this channel between iterations and prepends the
 	// messages to the next prompt, allowing humans to nudge the agent.
 	injectCh chan string
+
+	// methodCh receives method body updates from steer clients. The runAgent
+	// goroutine drains this channel between iterations and replaces the base
+	// prompt so all future iterations use the new text.
+	methodCh chan methodUpdate
 
 	// cancel stops this agent's goroutine.
 	cancel context.CancelFunc
@@ -208,6 +221,7 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 		RevisionID: obj.CurrentRevision,
 		StartedAt:  time.Now(),
 		injectCh:   make(chan string, 32),
+		methodCh:   make(chan methodUpdate, 4),
 		cancel:     agentCancel,
 		done:       make(chan struct{}),
 	}
@@ -474,6 +488,23 @@ func (e *Executor) runAgentLoop(ctx context.Context, run *AgentRun, firstPrompt 
 			log.Printf("executor: agent %q iteration %d: %d injected message(s) prepended to prompt", run.Name, iteration, len(injected))
 		}
 
+		// Drain any method body updates. If the loop's method was updated via
+		// the steer TUI's "edit prompt" feature, replace basePrompt so all
+		// future iterations use the new text. This is a permanent change,
+		// unlike inject which is a one-time prepend.
+	drainMethods:
+		for {
+			select {
+			case upd := <-run.methodCh:
+				basePrompt = upd.NewBody
+				iterPrompt = basePrompt // also update this iteration's prompt
+				log.Printf("executor: agent %q updated base prompt from method %q (%d bytes)",
+					run.Name, upd.MethodName, len(upd.NewBody))
+			default:
+				break drainMethods
+			}
+		}
+
 		ir := IterationResult{
 			Iteration: iteration,
 			StartedAt: time.Now(),
@@ -659,6 +690,33 @@ func (e *Executor) InjectMessage(agentName string, message string) error {
 	}
 
 	return nil
+}
+
+// UpdateMethodBody sends a method body update to a running agent. The agent's
+// loop goroutine will pick up the change before the next iteration and replace
+// its base prompt. If the agent is not running, this is a no-op — the server's
+// cached method bodies will be used when the agent next starts.
+func (e *Executor) UpdateMethodBody(agentName, methodName, newBody string) {
+	e.mu.Lock()
+	run, ok := e.runs[agentName]
+	e.mu.Unlock()
+
+	if !ok {
+		return // agent not running; cache update in server is sufficient
+	}
+
+	select {
+	case run.methodCh <- methodUpdate{MethodName: methodName, NewBody: newBody}:
+		log.Printf("executor: queued method update for agent %q method %q", agentName, methodName)
+	default:
+		// Channel full — drain one and retry
+		select {
+		case <-run.methodCh:
+		default:
+		}
+		run.methodCh <- methodUpdate{MethodName: methodName, NewBody: newBody}
+		log.Printf("executor: queued method update for agent %q method %q (replaced old)", agentName, methodName)
+	}
 }
 
 // OnIteration registers a callback invoked after each iteration completes.

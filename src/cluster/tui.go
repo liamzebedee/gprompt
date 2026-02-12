@@ -89,6 +89,8 @@ type TUIModel struct {
 
 	// Message input (for injection in iteration view)
 	msgInput     textinput.Model
+	// Prompt editing input (for loop view "edit prompt…" feature)
+	promptInput  textinput.Model
 	inputFocused bool // true = focus on input, false = focus on tree
 
 	// Scroll offset for iteration detail view (long chat history).
@@ -116,13 +118,18 @@ func NewTUIModel(client *SteerClient) TUIModel {
 	mi.Placeholder = "send message…"
 	mi.CharLimit = 4096
 
+	pi := textinput.New()
+	pi.Placeholder = "edit prompt…"
+	pi.CharLimit = 8192
+
 	return TUIModel{
-		client:    client,
+		client:      client,
 		searchInput: si,
 		msgInput:    mi,
-		runs:      make(map[string]AgentRunSnapshot),
-		methods:   make(map[string]map[string]string),
-		pipelines: make(map[string]*PipelineDef),
+		promptInput: pi,
+		runs:        make(map[string]AgentRunSnapshot),
+		methods:     make(map[string]map[string]string),
+		pipelines:   make(map[string]*PipelineDef),
 	}
 }
 
@@ -209,9 +216,12 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pass through to focused input
 	if m.inputFocused {
 		var cmd tea.Cmd
-		if m.selectedNodeKind() == NodeIteration {
+		switch m.selectedNodeKind() {
+		case NodeIteration:
 			m.msgInput, cmd = m.msgInput.Update(msg)
-		} else {
+		case NodeLoop:
+			m.promptInput, cmd = m.promptInput.Update(msg)
+		default:
 			m.searchInput, cmd = m.searchInput.Update(msg)
 		}
 		if cmd != nil {
@@ -241,16 +251,24 @@ func (m *TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.inputFocused = !m.inputFocused
 		if m.inputFocused {
-			if m.selectedNodeKind() == NodeIteration {
+			switch m.selectedNodeKind() {
+			case NodeIteration:
 				m.msgInput.Focus()
 				m.searchInput.Blur()
-			} else {
+				m.promptInput.Blur()
+			case NodeLoop:
+				m.promptInput.Focus()
+				m.searchInput.Blur()
+				m.msgInput.Blur()
+			default:
 				m.searchInput.Focus()
 				m.msgInput.Blur()
+				m.promptInput.Blur()
 			}
 		} else {
 			m.msgInput.Blur()
 			m.searchInput.Blur()
+			m.promptInput.Blur()
 		}
 		return m, nil
 	}
@@ -259,30 +277,48 @@ func (m *TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.inputFocused {
 		switch key {
 		case "enter":
-			if m.selectedNodeKind() == NodeIteration && m.msgInput.Value() != "" {
-				node := m.flatTree[m.cursor]
-				msg := m.msgInput.Value()
-				m.msgInput.Reset()
-				if err := m.client.Inject(node.AgentName, node.StepLabel, node.Iteration, msg); err != nil {
-					m.errText = fmt.Sprintf("inject error: %v", err)
+			switch m.selectedNodeKind() {
+			case NodeIteration:
+				if m.msgInput.Value() != "" {
+					node := m.flatTree[m.cursor]
+					msg := m.msgInput.Value()
+					m.msgInput.Reset()
+					if err := m.client.Inject(node.AgentName, node.StepLabel, node.Iteration, msg); err != nil {
+						m.errText = fmt.Sprintf("inject error: %v", err)
+					}
 				}
 				return m, nil
+			case NodeLoop:
+				if m.promptInput.Value() != "" {
+					node := m.flatTree[m.cursor]
+					newBody := m.promptInput.Value()
+					m.promptInput.Reset()
+					if err := m.client.EditPrompt(node.AgentName, node.StepLabel, newBody); err != nil {
+						m.errText = fmt.Sprintf("edit prompt error: %v", err)
+					}
+				}
+				return m, nil
+			default:
+				// Search input: just apply filter
+				m.searchQuery = m.searchInput.Value()
+				m.rebuildTree()
+				return m, nil
 			}
-			// Search input: just apply filter
-			m.searchQuery = m.searchInput.Value()
-			m.rebuildTree()
-			return m, nil
 		case "esc":
 			m.inputFocused = false
 			m.msgInput.Blur()
 			m.searchInput.Blur()
+			m.promptInput.Blur()
 			return m, nil
 		}
 		// Let input handle the key
 		var cmd tea.Cmd
-		if m.selectedNodeKind() == NodeIteration {
+		switch m.selectedNodeKind() {
+		case NodeIteration:
 			m.msgInput, cmd = m.msgInput.Update(msg)
-		} else {
+		case NodeLoop:
+			m.promptInput, cmd = m.promptInput.Update(msg)
+		default:
 			m.searchInput, cmd = m.searchInput.Update(msg)
 			m.searchQuery = m.searchInput.Value()
 			m.rebuildTree()
@@ -835,6 +871,15 @@ func (m TUIModel) renderLoopView(node *TreeNode, width, height int) string {
 	right := statsStyle.Render(statsContent.String())
 
 	sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, "│ ", right))
+
+	// Prompt editing input at the bottom (per spec: "❯ edit prompt…")
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("─", width-2))
+	sb.WriteString("\n")
+	m.promptInput.Width = width - 4
+	sb.WriteString("❯ ")
+	sb.WriteString(m.promptInput.View())
+	sb.WriteString("\n")
 
 	return sb.String()
 }

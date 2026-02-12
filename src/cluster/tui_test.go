@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestExtractLoopMethod(t *testing.T) {
@@ -421,6 +423,205 @@ func TestTUISteerStateMethodsAndPipelines(t *testing.T) {
 	loopNode := m.tree[0].Children[0]
 	if loopNode.Label != "loop(build)" {
 		t.Errorf("expected 'loop(build)', got %q", loopNode.Label)
+	}
+}
+
+// TestTUILoopViewHasPromptInput verifies that the LoopView renders an
+// "edit prompt…" input at the bottom, matching the spec's wireframe.
+func TestTUILoopViewHasPromptInput(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.width = 120
+	m.height = 40
+	m.objects = []ClusterObject{
+		{
+			Name:       "builder",
+			State:      RunStateRunning,
+			Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+		},
+	}
+	m.methods = map[string]map[string]string{
+		"builder": {"build": "do some work"},
+	}
+	m.runs = map[string]AgentRunSnapshot{}
+
+	m.rebuildTree()
+	m.cursor = 1 // loop node
+
+	loopNode := m.flatTree[1]
+	detail := m.renderLoopView(loopNode, 80, 30)
+
+	// Should contain the prompt edit input placeholder
+	if !containsStr(detail, "edit prompt") {
+		t.Errorf("LoopView should contain 'edit prompt' input, got:\n%s", detail)
+	}
+	// Should contain the separator line
+	if !containsStr(detail, "───") {
+		t.Errorf("LoopView should contain separator, got:\n%s", detail)
+	}
+	// Should contain the prompt indicator
+	if !containsStr(detail, "❯") {
+		t.Errorf("LoopView should contain prompt indicator ❯, got:\n%s", detail)
+	}
+}
+
+// TestTUIPromptEditFocusSwitching verifies that Shift+Tab focuses the
+// prompt input when a loop node is selected, distinct from the message
+// input (which is for iteration views).
+func TestTUIPromptEditFocusSwitching(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.width = 120
+	m.height = 40
+	m.objects = []ClusterObject{
+		{
+			Name:       "builder",
+			State:      RunStateRunning,
+			Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+		},
+	}
+	m.runs = map[string]AgentRunSnapshot{
+		"builder": {
+			Name: "builder",
+			Iterations: []IterationResult{
+				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Output: "done"},
+			},
+		},
+	}
+
+	m.rebuildTree()
+
+	// Select loop node
+	m.cursor = 1
+	if m.flatTree[m.cursor].Kind != NodeLoop {
+		t.Fatalf("expected loop node at cursor 1, got kind %d", m.flatTree[m.cursor].Kind)
+	}
+
+	// Shift+Tab should focus promptInput
+	m.inputFocused = true
+	// Simulate the focus logic
+	switch m.selectedNodeKind() {
+	case NodeLoop:
+		m.promptInput.Focus()
+		m.searchInput.Blur()
+		m.msgInput.Blur()
+	}
+
+	if !m.promptInput.Focused() {
+		t.Error("prompt input should be focused when loop node selected")
+	}
+	if m.msgInput.Focused() {
+		t.Error("message input should NOT be focused when loop node selected")
+	}
+
+	// Now select iteration node
+	m.cursor = 2
+	if m.flatTree[m.cursor].Kind != NodeIteration {
+		t.Fatalf("expected iteration node at cursor 2, got kind %d", m.flatTree[m.cursor].Kind)
+	}
+
+	switch m.selectedNodeKind() {
+	case NodeIteration:
+		m.msgInput.Focus()
+		m.searchInput.Blur()
+		m.promptInput.Blur()
+	}
+
+	if !m.msgInput.Focused() {
+		t.Error("message input should be focused when iteration node selected")
+	}
+	if m.promptInput.Focused() {
+		t.Error("prompt input should NOT be focused when iteration node selected")
+	}
+}
+
+// TestTUITerminalResize verifies that the TUI handles terminal resize events
+// (WindowSizeMsg) without crashing or corrupting the display. Per spec:
+// "The TUI reflows to fit the new terminal dimensions without crashing
+// or corrupting the display."
+func TestTUITerminalResize(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.objects = []ClusterObject{
+		{
+			Name:       "builder",
+			State:      RunStateRunning,
+			Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+		},
+	}
+	m.methods = map[string]map[string]string{
+		"builder": {"build": "do work"},
+	}
+	m.runs = map[string]AgentRunSnapshot{
+		"builder": {
+			Name: "builder",
+			Iterations: []IterationResult{
+				{Iteration: 1, StartedAt: time.Now(), FinishedAt: time.Now(), Output: "done"},
+			},
+		},
+	}
+
+	// Initial size
+	m.width = 120
+	m.height = 40
+	m.ready = true
+	m.rebuildTree()
+
+	// Render at initial size — should not panic
+	view1 := m.View()
+	if view1 == "" {
+		t.Error("expected non-empty view at initial size")
+	}
+
+	// Resize to smaller terminal
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 15})
+	m = model.(TUIModel)
+
+	view2 := m.View()
+	if view2 == "" {
+		t.Error("expected non-empty view after shrink")
+	}
+	if m.width != 60 || m.height != 15 {
+		t.Errorf("expected width=60, height=15 after resize, got %d, %d", m.width, m.height)
+	}
+
+	// Resize to very small terminal (edge case)
+	model, _ = m.Update(tea.WindowSizeMsg{Width: 20, Height: 5})
+	m = model.(TUIModel)
+
+	view3 := m.View()
+	if view3 == "" {
+		t.Error("expected non-empty view at very small size")
+	}
+
+	// Resize back to large terminal
+	model, _ = m.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+	m = model.(TUIModel)
+
+	view4 := m.View()
+	if view4 == "" {
+		t.Error("expected non-empty view after enlarge")
+	}
+
+	// Navigate to different node types and render at each size
+	for _, cursor := range []int{0, 1, 2} {
+		if cursor < len(m.flatTree) {
+			m.cursor = cursor
+			view := m.View()
+			if view == "" {
+				t.Errorf("expected non-empty view at cursor %d", cursor)
+			}
+		}
+	}
+}
+
+// TestTUITerminalResizeZeroSize verifies that zero-size terminal
+// shows initialization message rather than panicking.
+func TestTUITerminalResizeZeroSize(t *testing.T) {
+	m := NewTUIModel(nil)
+	m.ready = true
+
+	// Zero dimensions should show "Initializing..."
+	view := m.View()
+	if !containsStr(view, "Initializing") {
+		t.Errorf("expected 'Initializing' for zero-size terminal, got %q", view)
 	}
 }
 

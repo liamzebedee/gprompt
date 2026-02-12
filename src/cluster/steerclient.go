@@ -288,6 +288,38 @@ func (sc *SteerClient) Inject(agentName, stepLabel string, iteration int, messag
 	return nil
 }
 
+// EditPrompt sends a request to replace an agent's method body. The server
+// updates its cached method body and the executor uses the new body starting
+// from the next loop iteration. All connected steer clients see the change
+// reflected in the next state push.
+func (sc *SteerClient) EditPrompt(agentName, methodName, newBody string) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	if sc.closed {
+		return fmt.Errorf("client closed")
+	}
+
+	req := SteerEditPromptRequest{
+		AgentName:  agentName,
+		MethodName: methodName,
+		NewBody:    newBody,
+	}
+	env, err := NewEnvelope(MsgSteerEditPrompt, req)
+	if err != nil {
+		return fmt.Errorf("marshal edit_prompt: %w", err)
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshal edit_prompt: %w", err)
+	}
+	data = append(data, '\n')
+	if _, err := sc.conn.Write(data); err != nil {
+		return fmt.Errorf("send edit_prompt: %w", err)
+	}
+	return nil
+}
+
 // Close disconnects from the master and stops the reconnect loop.
 // It is safe to call multiple times.
 func (sc *SteerClient) Close() error {

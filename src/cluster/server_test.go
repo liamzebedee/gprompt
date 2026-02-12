@@ -473,6 +473,71 @@ func TestServerSteerStateIncludesMethodsAndPipelines(t *testing.T) {
 	}
 }
 
+// TestServerEditPromptUpdatesMethodCache verifies that steer_edit_prompt
+// messages update the server's cached method bodies, and the change is
+// reflected in subsequent steer_state pushes to all connected clients.
+func TestServerEditPromptUpdatesMethodCache(t *testing.T) {
+	// Use a slow claude function so the agent stays alive during the test.
+	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+		select {
+		case <-time.After(5 * time.Second):
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	srv, _, cleanup := startTestServerWithExecutor(t, claudeFn)
+	defer cleanup()
+
+	// Apply an agent with initial method body
+	conn1, scanner1 := dial(t, srv.Addr())
+	sendEnvelope(t, conn1, MsgApplyRequest, ApplyRequest{
+		Agents: []AgentDef{
+			{
+				Name:       "builder",
+				ID:         "abc",
+				Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+				Methods:    map[string]string{"build": "original prompt"},
+				Pipeline: &PipelineDef{
+					Steps: []PipelineStep{
+						{Label: "build", Kind: StepKindLoop, LoopMethod: "build"},
+					},
+				},
+			},
+		},
+	})
+	readEnvelope(t, scanner1)
+	conn1.Close()
+
+	// Wait for agent to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Subscribe as steer client
+	steerConn, steerScanner := dial(t, srv.Addr())
+	defer steerConn.Close()
+	sendEnvelope(t, steerConn, MsgSteerSubscribe, SteerSubscribeRequest{})
+	readEnvelope(t, steerScanner) // initial state
+
+	// Send edit prompt
+	sendEnvelope(t, steerConn, MsgSteerEditPrompt, SteerEditPromptRequest{
+		AgentName:  "builder",
+		MethodName: "build",
+		NewBody:    "updated prompt: focus on security",
+	})
+
+	// Should receive updated state push with new method body
+	env := readEnvelope(t, steerScanner)
+	if env.Type != MsgSteerState {
+		t.Fatalf("expected steer_state, got %s", env.Type)
+	}
+
+	var updated SteerStatePayload
+	env.DecodePayload(&updated)
+	if body := updated.Methods["builder"]["build"]; body != "updated prompt: focus on security" {
+		t.Fatalf("expected updated method body, got %q", body)
+	}
+}
+
 // TestServerMultipleSteerClients verifies that multiple steer clients
 // all receive state push updates.
 func TestServerMultipleSteerClients(t *testing.T) {
@@ -506,5 +571,111 @@ func TestServerMultipleSteerClients(t *testing.T) {
 
 	if env1.Type != MsgSteerState || env2.Type != MsgSteerState {
 		t.Fatalf("expected steer_state for both, got %s and %s", env1.Type, env2.Type)
+	}
+}
+
+// TestConcurrentSteerSessionConsistency verifies that two steer clients
+// connected simultaneously see consistent state, including when both
+// inject messages into the same agent concurrently. Per spec: "Two steer
+// terminals connected to the same master show consistent state."
+func TestConcurrentSteerSessionConsistency(t *testing.T) {
+	// Track all prompts received by the agent.
+	var prompts []string
+	var mu sync.Mutex
+	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		mu.Unlock()
+		select {
+		case <-time.After(30 * time.Millisecond):
+			return "output", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	srv, _, cleanup := startTestServerWithExecutor(t, claudeFn)
+	defer cleanup()
+
+	// Apply an agent
+	conn1, scanner1 := dial(t, srv.Addr())
+	sendEnvelope(t, conn1, MsgApplyRequest, ApplyRequest{
+		Agents: []AgentDef{
+			{
+				Name:       "shared",
+				ID:         "abc",
+				Definition: `(defagent "shared" (loop work))`,
+				Methods:    map[string]string{"work": "base prompt"},
+			},
+		},
+	})
+	readEnvelope(t, scanner1)
+	conn1.Close()
+
+	// Wait for agent to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Subscribe two steer clients
+	steer1, scan1 := dial(t, srv.Addr())
+	defer steer1.Close()
+	sendEnvelope(t, steer1, MsgSteerSubscribe, SteerSubscribeRequest{})
+	state1 := readEnvelope(t, scan1) // initial state
+
+	steer2, scan2 := dial(t, srv.Addr())
+	defer steer2.Close()
+	sendEnvelope(t, steer2, MsgSteerSubscribe, SteerSubscribeRequest{})
+	state2 := readEnvelope(t, scan2) // initial state
+
+	// Both should see the same initial state (1 agent)
+	var payload1, payload2 SteerStatePayload
+	state1.DecodePayload(&payload1)
+	state2.DecodePayload(&payload2)
+
+	if len(payload1.Objects) != len(payload2.Objects) {
+		t.Fatalf("inconsistent initial state: client1 sees %d objects, client2 sees %d",
+			len(payload1.Objects), len(payload2.Objects))
+	}
+
+	// Both clients inject messages concurrently
+	sendEnvelope(t, steer1, MsgSteerInject, SteerInjectRequest{
+		AgentName: "shared", StepLabel: "work", Iteration: 1, Message: "msg-from-client-1",
+	})
+	sendEnvelope(t, steer2, MsgSteerInject, SteerInjectRequest{
+		AgentName: "shared", StepLabel: "work", Iteration: 1, Message: "msg-from-client-2",
+	})
+
+	// Wait for the agent to process the messages and complete iterations
+	time.Sleep(150 * time.Millisecond)
+
+	// Both clients should receive state push updates — read at least one
+	// push from each to verify they're getting updates.
+	env1 := readEnvelope(t, scan1)
+	env2 := readEnvelope(t, scan2)
+
+	if env1.Type != MsgSteerState {
+		t.Fatalf("client1: expected steer_state push, got %s", env1.Type)
+	}
+	if env2.Type != MsgSteerState {
+		t.Fatalf("client2: expected steer_state push, got %s", env2.Type)
+	}
+
+	// Verify both injected messages were delivered to the agent
+	mu.Lock()
+	defer mu.Unlock()
+
+	foundClient1, foundClient2 := false, false
+	for _, p := range prompts {
+		if strings.Contains(p, "msg-from-client-1") {
+			foundClient1 = true
+		}
+		if strings.Contains(p, "msg-from-client-2") {
+			foundClient2 = true
+		}
+	}
+	if !foundClient1 {
+		t.Error("expected client 1's inject message to be delivered to agent")
+	}
+	if !foundClient2 {
+		t.Error("expected client 2's inject message to be delivered to agent")
 	}
 }

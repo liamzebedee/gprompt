@@ -14,6 +14,7 @@ const (
 	MsgSteerSubscribe  MessageType = "steer_subscribe"
 	MsgSteerState      MessageType = "steer_state"
 	MsgSteerInject     MessageType = "steer_inject"
+	MsgSteerEditPrompt MessageType = "steer_edit_prompt"
 	MsgShutdownNotice  MessageType = "shutdown_notice"
 )
 
@@ -61,6 +62,16 @@ type SteerInjectRequest struct {
 	StepLabel string `json:"step_label"`
 	Iteration int    `json:"iteration"`
 	Message   string `json:"message"`
+}
+
+// SteerEditPromptRequest asks the server to replace an agent's method body.
+// The executor will use the new body starting from the next loop iteration.
+// This is semantically different from inject (which is a one-time prepend):
+// edit prompt permanently changes the base prompt for all future iterations.
+type SteerEditPromptRequest struct {
+	AgentName  string `json:"agent_name"`
+	MethodName string `json:"method_name"`
+	NewBody    string `json:"new_body"`
 }
 
 // ShutdownNoticePayload notifies clients the master is shutting down.

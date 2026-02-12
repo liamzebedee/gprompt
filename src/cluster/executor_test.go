@@ -775,3 +775,72 @@ func TestSplitItems(t *testing.T) {
 		t.Fatalf("empty: expected nil, got %v", items)
 	}
 }
+
+// TestUpdateMethodBody verifies that UpdateMethodBody delivers a method body
+// update to a running agent's loop goroutine, replacing the base prompt for
+// all subsequent iterations. This is the "edit prompt" feature in the TUI.
+func TestUpdateMethodBody(t *testing.T) {
+	store := NewStore()
+	seedAgent(store, "editor")
+
+	var prompts []string
+	var mu sync.Mutex
+	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		mu.Unlock()
+		select {
+		case <-time.After(10 * time.Millisecond):
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	exec := NewExecutor(store, claudeFn)
+
+	if err := exec.Start("editor", map[string]string{"work": "original prompt"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Let a few iterations run with the original prompt.
+	time.Sleep(30 * time.Millisecond)
+
+	// Update the method body.
+	exec.UpdateMethodBody("editor", "work", "updated prompt: focus on security")
+
+	// Let a few more iterations run with the updated prompt.
+	time.Sleep(50 * time.Millisecond)
+
+	exec.StopAll(2 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify that at least one prompt contained "updated prompt"
+	found := false
+	for _, p := range prompts {
+		if strings.Contains(p, "updated prompt: focus on security") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected at least one prompt with updated body; got %d prompts: %v", len(prompts), prompts)
+	}
+
+	// Verify that the early prompts used the original prompt
+	if len(prompts) > 0 && !strings.Contains(prompts[0], "original prompt") {
+		t.Errorf("first prompt should use original body, got %q", prompts[0])
+	}
+}
+
+// TestUpdateMethodBodyNonRunning verifies that UpdateMethodBody is a no-op
+// for agents that aren't running (no panic, no error).
+func TestUpdateMethodBodyNonRunning(t *testing.T) {
+	store := NewStore()
+	exec := NewExecutor(store, fakeClaude(0))
+
+	// Should not panic or error — just a no-op.
+	exec.UpdateMethodBody("ghost", "work", "new body")
+}
