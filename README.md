@@ -15,7 +15,7 @@ how do trees grow?
 ```
 
 ```sh
-$ gprompt -d examples/y/y.p
+$ gprompt examples/y/y.p
 Trees grow by adding new cells at their tips (apical meristems) and widening their trunks through a layer called the cambium. Here are 10 key points:
 
 1. Seeds germinate when moisture, warmth, and light align
@@ -123,7 +123,7 @@ There are some benefits to defining this workflow:
 For example, here's how to test an individual prompt:
 
 ```sh
-$ gprompt -d examples/book/book.p -e "@book-idea(egyptian llm's)"
+$ gprompt examples/book/book.p -e "@book-idea(egyptian llm's)"
 ```
 
 Which will output for `We are writing a book about egyptian llm's. Generate a briefer on what it should cover and why it's good.`. 
@@ -176,7 +176,7 @@ But what if you didn't have to?
 
 ## Autoscaled agents
 
-```
+```yaml
 agent1:
 	loop(build)
 
@@ -184,7 +184,7 @@ agent2:
 	loop(bugfix)
 ```
 
-`gprompt apply agents.p`
+`gprompt agents.p`
 
 ---
 
