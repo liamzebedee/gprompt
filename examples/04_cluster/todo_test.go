@@ -1238,3 +1238,159 @@ func TestPriorityPersistence(t *testing.T) {
 		t.Errorf("expected priority high after reload, got %q", s2.Items[0].Priority)
 	}
 }
+
+func TestSnapshotAndUndo(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.Add("First")
+	_, _ = s.Add("Second")
+	s.Save()
+
+	// Snapshot before deleting.
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(1); err != nil {
+		t.Fatal(err)
+	}
+	s.Save()
+
+	if len(s.Items) != 1 {
+		t.Fatalf("expected 1 item after delete, got %d", len(s.Items))
+	}
+
+	// Undo should restore both items.
+	if err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Items) != 2 {
+		t.Fatalf("expected 2 items after undo, got %d", len(s.Items))
+	}
+	if s.Items[0].Title != "First" || s.Items[1].Title != "Second" {
+		t.Errorf("unexpected items after undo: %v", s.Items)
+	}
+}
+
+func TestUndoNothingToUndo(t *testing.T) {
+	s := tempStore(t)
+	err := s.Undo()
+	if err == nil {
+		t.Fatal("expected error when nothing to undo")
+	}
+	if err.Error() != "nothing to undo" {
+		t.Errorf("expected 'nothing to undo', got %q", err.Error())
+	}
+}
+
+func TestUndoOnlyOnce(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.Add("Task")
+	s.Save()
+
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(1); err != nil {
+		t.Fatal(err)
+	}
+	s.Save()
+
+	// First undo succeeds.
+	if err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	// Second undo should fail (undo file removed).
+	if err := s.Undo(); err == nil {
+		t.Fatal("expected error on second undo")
+	}
+}
+
+func TestUndoRestoresEditedTitle(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.Add("Original")
+	s.Save()
+
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Edit(1, "Changed"); err != nil {
+		t.Fatal(err)
+	}
+	s.Save()
+
+	if s.Items[0].Title != "Changed" {
+		t.Fatalf("expected 'Changed', got %q", s.Items[0].Title)
+	}
+
+	if err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Items[0].Title != "Original" {
+		t.Errorf("expected 'Original' after undo, got %q", s.Items[0].Title)
+	}
+}
+
+func TestUndoRestoresClearedItems(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.Add("Keep")
+	_, _ = s.Add("Remove")
+	s.SetStatus(2, StatusDone)
+	s.Save()
+
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	removed := s.ClearDone()
+	if removed != 1 {
+		t.Fatalf("expected 1 removed, got %d", removed)
+	}
+	s.Save()
+
+	if err := s.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Items) != 2 {
+		t.Fatalf("expected 2 items after undo, got %d", len(s.Items))
+	}
+}
+
+func TestUndoPersistsToDisk(t *testing.T) {
+	s := tempStore(t)
+	t.Cleanup(func() { os.Remove(s.undoFile()) })
+
+	_, _ = s.Add("Persist me")
+	s.Save()
+
+	if err := s.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(1); err != nil {
+		t.Fatal(err)
+	}
+	s.Save()
+
+	// Create a fresh store from the same file and undo.
+	s2 := NewStore(s.file)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Items) != 0 {
+		t.Fatalf("expected 0 items before undo, got %d", len(s2.Items))
+	}
+	if err := s2.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Items) != 1 {
+		t.Fatalf("expected 1 item after undo, got %d", len(s2.Items))
+	}
+	if s2.Items[0].Title != "Persist me" {
+		t.Errorf("expected 'Persist me', got %q", s2.Items[0].Title)
+	}
+}

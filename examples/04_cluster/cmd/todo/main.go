@@ -31,6 +31,7 @@ Commands:
   stats               Show counts by status
   sort <field>        Sort items by: priority, due, status, created
   clear               Remove all completed items
+  undo                Revert the last change
   export              Output all items as CSV
   help                Show this message
 `, todo.DefaultFile)
@@ -99,6 +100,10 @@ func main() {
 			os.Exit(1)
 		}
 		title := todo.ParseAddTitle(args)
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		item, err := store.AddFull(title, priority, due)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -135,6 +140,10 @@ func main() {
 
 	case "done":
 		id := requireID()
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.SetStatus(id, todo.StatusDone); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -147,6 +156,10 @@ func main() {
 
 	case "start":
 		id := requireID()
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.SetStatus(id, todo.StatusInProgress); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -159,6 +172,10 @@ func main() {
 
 	case "delete":
 		id := requireID()
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.Delete(id); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -180,6 +197,10 @@ func main() {
 			os.Exit(1)
 		}
 		newTitle := todo.ParseAddTitle(os.Args[3:])
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.Edit(id, newTitle); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -210,6 +231,10 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Invalid priority: %q (valid values: low, medium, high, none)\n", priStr)
 				os.Exit(1)
 			}
+		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
 		}
 		if err := store.SetPriority(id, pri); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -274,6 +299,10 @@ func main() {
 				os.Exit(1)
 			}
 		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.SetDueDate(id, due); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -294,6 +323,10 @@ func main() {
 			os.Exit(1)
 		}
 		field := todo.SortField(os.Args[2])
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.Sort(field); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -309,6 +342,10 @@ func main() {
 		}
 
 	case "clear":
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
 		removed := store.ClearDone()
 		if err := store.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
@@ -318,6 +355,17 @@ func main() {
 			fmt.Println("No completed items to clear.")
 		} else {
 			fmt.Printf("Cleared %d completed item(s).\n", removed)
+		}
+
+	case "undo":
+		if err := store.Undo(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Undo successful.")
+		items, _ := store.List("")
+		if len(items) > 0 {
+			printItems(items, color)
 		}
 
 	case "export":

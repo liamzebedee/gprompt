@@ -109,6 +109,52 @@ type Store struct {
 	Items  []Item `json:"items"`
 }
 
+// undoFile returns the path to the undo backup file for this store.
+func (s *Store) undoFile() string {
+	return s.file + ".undo"
+}
+
+// Snapshot saves the current state to an undo backup file so it can be restored later.
+func (s *Store) Snapshot() error {
+	envelope := struct {
+		NextID int    `json:"next_id"`
+		Items  []Item `json:"items"`
+	}{
+		NextID: s.NextID,
+		Items:  s.Items,
+	}
+	data, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.undoFile(), data, 0644)
+}
+
+// Undo restores the store to the state saved by the last Snapshot call.
+// It removes the undo file after a successful restore.
+func (s *Store) Undo() error {
+	data, err := os.ReadFile(s.undoFile())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("nothing to undo")
+		}
+		return err
+	}
+	var raw struct {
+		NextID int    `json:"next_id"`
+		Items  []Item `json:"items"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("corrupted undo file: %w", err)
+	}
+	s.NextID = raw.NextID
+	s.Items = raw.Items
+	if err := s.Save(); err != nil {
+		return err
+	}
+	return os.Remove(s.undoFile())
+}
+
 func NewStore(file string) *Store {
 	return &Store{file: file}
 }

@@ -6,6 +6,8 @@
 
 ## Completed
 
+- [x] Add `todo undo` command to revert the last change (snapshot-based single-level undo)
+
 - [x] Add `todo sort <field>` command to reorder items by priority, due date, status, or creation date
 
 - [x] Add `todo clear` command to bulk-remove all completed items
