@@ -2,9 +2,9 @@
 
 ## Open
 
-- [ ] `Add` and `Edit` do not trim leading/trailing whitespace from titles — stored as-is with accidental spaces
-
 ## Resolved
+
+- [x] `Add` and `Edit` do not trim leading/trailing whitespace from titles — stored as-is with accidental spaces
 
 - [x] Empty or whitespace-only titles accepted by `add` and `edit` — should reject with error
 - [x] IDs are not stable after delete — deleted IDs can be reused on next add
