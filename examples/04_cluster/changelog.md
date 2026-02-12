@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.0 (`9efc88a`)
+* Add `sort` command to reorder items by priority, due date, status, or creation date (`todo sort <field>`)
+* Add `Sort` method on `Store` with stable in-place reordering and persistence
+* Add `SortField` type with `ValidSortField` helper for field validation
+* Change `Search` return signature to `([]Item, error)` and reject empty/whitespace-only queries
+* Add tests for sort by priority, due, status, created, invalid field, empty store, persistence, and `ValidSortField`
+* Add test for `Search` rejecting empty queries
+* Update BACKLOG: mark `sort` command as completed
+
+## 1.1.1 (`96ba19d`)
+* Mark whitespace-not-trimmed bug as resolved in BUG_BACKLOG (fix was applied in 1.1.0)
+
+## 1.1.0 (`2648f42`)
+* Add `clear` command to bulk-remove all completed items (`todo clear`)
+* Add `ClearDone` method on `Store` — removes all done items and returns count removed
+* Fix `Add`/`AddFull`/`Edit` to trim leading/trailing whitespace from titles before storing
+* Add tests for `ClearDone` (empty store, only-done removed, all done, none done)
+* Add tests for whitespace trimming in `Add`, `AddFull`, and `Edit`
+* Log whitespace-not-trimmed bug in BUG_BACKLOG as resolved by trimming fix
+* Update BACKLOG: mark `clear` command, color-coded output, `stats` command, and `--file` flag as completed
+
 ## 1.0.1 (`d4abdc5`)
 * Mark `AddFull`/`AddWithPriority` invalid-priority bug as resolved in BUG_BACKLOG
 

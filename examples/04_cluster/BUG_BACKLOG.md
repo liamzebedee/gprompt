@@ -4,6 +4,8 @@
 
 ## Resolved
 
+- [x] `Search` accepts empty or whitespace-only query — returns all items instead of rejecting with error
+
 - [x] `Add` and `Edit` do not trim leading/trailing whitespace from titles — stored as-is with accidental spaces
 
 - [x] Empty or whitespace-only titles accepted by `add` and `edit` — should reject with error
