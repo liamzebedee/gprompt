@@ -2,7 +2,7 @@
 
 ## Current State
 
-Phases 0–4 are complete. The full apply→execute→steer flow works: master listens on TCP, apply client parses `.p` files, extracts `agent-` definitions with resolved method bodies, sends to master, master stores and auto-starts pending agents. Each agent runs in its own goroutine calling `claude` CLI in a loop. The steer TUI connects to master, subscribes for real-time state updates (including iteration data), and presents a two-pane view with tree navigation and detail views. Next: Phase 5 (polish and edge cases).
+Phases 0–5 (partial) are complete. The full apply→execute→steer flow works: master listens on TCP, apply client parses `.p` files, extracts `agent-` definitions with resolved method bodies, sends to master, master stores and auto-starts pending agents. Each agent runs in its own goroutine calling `claude` CLI in a loop. The steer TUI connects to master, subscribes for real-time state updates (including iteration data), and presents a two-pane view with tree navigation and detail views. Steer clients can inject messages into running agent conversations with automatic reconnection and exponential backoff on disconnection. Next: remaining Phase 5 items (multi-step pipeline execution, concurrent session consistency, terminal resize handling).
 
 ---
 
@@ -25,16 +25,27 @@ Phases 0–4 are complete. The full apply→execute→steer flow works: master l
 - **4.6 Iteration data in state pushes** — DONE. Extended `SteerStatePayload` with `Runs map[string]AgentRunSnapshot` carrying iteration results. Executor fires `OnIteration` callback after each iteration, triggering real-time pushes. Snapshot capped at 10 most recent iterations per agent to limit payload size.
 - **4.7 cmdSteer wired** — DONE. `cmdSteer` in `main.go` parses `--addr` flag, creates `SteerClient`, runs bubbletea `Program` with `AltScreen`.
 
-**Testing:** 49 total tests passing: `store_test.go` (12), `protocol_test.go` (4), `persist_test.go` (5), `server_test.go` (7), `executor_test.go` (12), `steerclient_test.go` (4), `tui_test.go` (5).
+### Phase 5: Polish and Edge Cases (partial) ✓
+
+- **5.1 Steer inject forwarding to running agent conversations** — DONE. `Executor.InjectMessage(agentName, message)` delivers messages to running agents. Each `AgentRun` has a buffered inject channel (32 messages). The `runAgent` goroutine drains injected messages before each iteration and prepends them to the prompt with `[Steering messages from human operator]` framing. `Server.handleSteerInject` now forwards to `executor.InjectMessage()` instead of just logging.
+- **5.2 Disconnection banner + auto-reconnect in steer TUI** — DONE. `SteerClient.readLoop` now calls `reconnect()` on disconnect with exponential backoff (1s→2s→4s, capped 10s). New `ReconnectCh` channel signals TUI on reconnection. TUI clears error banner on reconnect. Fixed `Close()` deadlock by releasing mutex before waiting for done channel.
+- **5.3 Executor.Start mutex deadlock fix** — DONE. Fixed pre-existing deadlock: `Start()` held `Executor.mu` while calling `Store.SetRunState`, which triggered `OnChange` → `pushState` → `Executor.Snapshot()` → tried to lock `Executor.mu` again. Fix: release lock before `SetRunState`, re-check after reacquiring.
+
+**Testing:** 55 total tests passing: `store_test.go` (12), `protocol_test.go` (4), `persist_test.go` (5), `server_test.go` (8), `executor_test.go` (15), `steerclient_test.go` (6), `tui_test.go` (5).
+
+New Phase 5 tests:
+- `TestExecutorInjectMessage` — verifies injected messages appear in agent prompts
+- `TestExecutorInjectMessageNonRunning` — error for non-running agent
+- `TestServerInjectForwarding` — end-to-end inject through TCP protocol
+- `TestSteerClientReconnect` — auto-reconnect after master restart
+- `startTestServerWithExecutor` — test helper for server + executor tests
 
 ---
 
 ## Remaining Work
 
-### Phase 5: Polish and Edge Cases
-- Disconnection banner + reconnect in steer TUI (currently shows error, no auto-reconnect)
+### Phase 5: Polish and Edge Cases (remaining items)
 - Multi-step pipeline execution in executor (currently supports single loop step)
-- Steer inject forwarding to running agent conversations (currently logged on server, not delivered to agent)
 - Concurrent steer session consistency verification
 - Terminal resize reflow testing
 - Prompt editing in LoopView (spec mentions "edit prompt…" input)
@@ -58,4 +69,4 @@ Phases 0–4 are complete. The full apply→execute→steer flow works: master l
 
 ---
 
-*Updated 2026-02-12. Reflects completed Phases 0–4 including steer TUI.*
+*Updated 2026-02-12. Reflects completed Phases 0–5 (partial) including steer TUI with message injection and auto-reconnect.*

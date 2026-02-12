@@ -2,9 +2,11 @@ package cluster
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -306,6 +308,104 @@ func TestServerPortInUse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "listen on") {
 		t.Fatalf("expected 'listen on' in error, got: %v", err)
+	}
+}
+
+// startTestServerWithExecutor creates a server with a real executor
+// using a fake claude function, for testing inject forwarding.
+func startTestServerWithExecutor(t *testing.T, claudeFn ClaudeFunc) (*Server, *Store, func()) {
+	t.Helper()
+	store := NewStore()
+	srv := NewServer(store, "127.0.0.1:0", claudeFn)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for srv.listener == nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if srv.listener == nil {
+		t.Fatal("server did not start in time")
+	}
+
+	cleanup := func() {
+		srv.Stop()
+	}
+	return srv, store, cleanup
+}
+
+// TestServerInjectForwarding verifies that steer_inject messages are
+// forwarded through the server to the executor, and the agent receives
+// the injected message in its next iteration prompt.
+func TestServerInjectForwarding(t *testing.T) {
+	// Track prompts to verify injection delivery
+	var prompts []string
+	var mu sync.Mutex
+	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		mu.Unlock()
+		select {
+		case <-time.After(30 * time.Millisecond):
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	srv, _, cleanup := startTestServerWithExecutor(t, claudeFn)
+	defer cleanup()
+
+	// Apply an agent via the TCP protocol
+	conn1, scanner1 := dial(t, srv.Addr())
+	sendEnvelope(t, conn1, MsgApplyRequest, ApplyRequest{
+		Agents: []AgentDef{
+			{
+				Name:       "builder",
+				ID:         "abc",
+				Definition: `(defagent "builder" (pipeline (step "build" (loop build))))`,
+				Methods:    map[string]string{"build": "do some work"},
+			},
+		},
+	})
+	readEnvelope(t, scanner1) // consume response
+	conn1.Close()
+
+	// Wait for agent to start executing
+	time.Sleep(50 * time.Millisecond)
+
+	// Subscribe as steer client and send an inject
+	steerConn, steerScanner := dial(t, srv.Addr())
+	defer steerConn.Close()
+	sendEnvelope(t, steerConn, MsgSteerSubscribe, SteerSubscribeRequest{})
+	readEnvelope(t, steerScanner) // consume initial state
+
+	// Send inject
+	sendEnvelope(t, steerConn, MsgSteerInject, SteerInjectRequest{
+		AgentName: "builder",
+		StepLabel: "build",
+		Iteration: 1,
+		Message:   "prioritize security fixes",
+	})
+
+	// Wait for the agent to complete another iteration with the injected message
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	found := false
+	for _, p := range prompts {
+		if strings.Contains(p, "prioritize security fixes") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected injected message to appear in agent prompt; got %d prompts", len(prompts))
 	}
 }
 

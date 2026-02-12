@@ -63,6 +63,9 @@ type errMsg struct{ err error }
 
 func (e errMsg) Error() string { return e.err.Error() }
 
+// reconnectMsg signals that the client reconnected to the master.
+type reconnectMsg struct{}
+
 // --- TUI Model ---
 
 // TUIModel is the bubbletea model for gcluster steer.
@@ -120,6 +123,7 @@ func (m TUIModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.waitForState(),
 		m.waitForError(),
+		m.waitForReconnect(),
 	)
 }
 
@@ -145,6 +149,17 @@ func (m TUIModel) waitForError() tea.Cmd {
 	}
 }
 
+// waitForReconnect returns a Cmd that waits for a successful reconnection.
+func (m TUIModel) waitForReconnect() tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-m.client.ReconnectCh
+		if !ok {
+			return nil
+		}
+		return reconnectMsg{}
+	}
+}
+
 // Update handles messages.
 func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -167,7 +182,11 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.errText = msg.Error()
-		return m, nil
+		return m, m.waitForError()
+
+	case reconnectMsg:
+		m.errText = ""
+		return m, m.waitForReconnect()
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)

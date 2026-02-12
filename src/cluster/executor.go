@@ -32,6 +32,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,6 +68,11 @@ type AgentRun struct {
 	// Iterations records the outcome of each completed iteration.
 	// Protected by mu.
 	Iterations []IterationResult
+
+	// injectCh receives steering messages from steer clients. The runAgent
+	// goroutine drains this channel between iterations and prepends the
+	// messages to the next prompt, allowing humans to nudge the agent.
+	injectCh chan string
 
 	// cancel stops this agent's goroutine.
 	cancel context.CancelFunc
@@ -158,11 +164,21 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 		e.mu.Unlock()
 		return fmt.Errorf("agent %q not found in store", name)
 	}
+	e.mu.Unlock()
 
-	// Transition to running in the store.
+	// Transition to running in the store. This is done outside the executor
+	// lock because SetRunState triggers Store.OnChange, which may call
+	// pushState → Executor.Snapshot(), creating a lock ordering issue.
 	if !e.store.SetRunState(name, RunStateRunning) {
-		e.mu.Unlock()
 		return fmt.Errorf("agent %q: failed to set running state", name)
+	}
+
+	e.mu.Lock()
+	// Re-check: another goroutine might have started this agent between
+	// our unlock above and this lock.
+	if _, running := e.runs[name]; running {
+		e.mu.Unlock()
+		return nil
 	}
 
 	agentCtx, agentCancel := context.WithCancel(e.rootCtx)
@@ -170,6 +186,7 @@ func (e *Executor) Start(name string, methods map[string]string) error {
 		Name:       name,
 		RevisionID: obj.CurrentRevision,
 		StartedAt:  time.Now(),
+		injectCh:   make(chan string, 32),
 		cancel:     agentCancel,
 		done:       make(chan struct{}),
 	}
@@ -233,6 +250,11 @@ func (e *Executor) resolvePrompt(obj *ClusterObject, methods map[string]string) 
 // runAgent is the goroutine body for a running agent. It loops forever,
 // calling claude with the prompt each iteration, until the context is
 // cancelled (agent stopped or executor shut down).
+//
+// Between iterations, the goroutine drains the inject channel for any
+// steering messages from steer clients. Injected messages are prepended
+// to the base prompt for the next iteration, allowing humans to nudge
+// the agent's behaviour without restarting it.
 func (e *Executor) runAgent(ctx context.Context, run *AgentRun, prompt string) {
 	defer close(run.done)
 
@@ -248,13 +270,41 @@ func (e *Executor) runAgent(ctx context.Context, run *AgentRun, prompt string) {
 		default:
 		}
 
+		// Drain any injected steering messages and prepend them to the prompt
+		// for this iteration. This allows steer clients to influence the agent's
+		// next action without restarting it.
+		iterPrompt := prompt
+		var injected []string
+		drain:
+		for {
+			select {
+			case msg := <-run.injectCh:
+				injected = append(injected, msg)
+			default:
+				break drain
+			}
+		}
+		if len(injected) > 0 {
+			var sb strings.Builder
+			sb.WriteString("[Steering messages from human operator]\n")
+			for _, msg := range injected {
+				sb.WriteString("- ")
+				sb.WriteString(msg)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("[End of steering messages]\n\n")
+			sb.WriteString(iterPrompt)
+			iterPrompt = sb.String()
+			log.Printf("executor: agent %q iteration %d: %d injected message(s) prepended to prompt", run.Name, iteration, len(injected))
+		}
+
 		ir := IterationResult{
 			Iteration: iteration,
 			StartedAt: time.Now(),
 		}
 
 		log.Printf("executor: agent %q starting iteration %d", run.Name, iteration)
-		output, err := e.claudeFn(ctx, prompt)
+		output, err := e.claudeFn(ctx, iterPrompt)
 		ir.FinishedAt = time.Now()
 
 		if err != nil {
@@ -400,6 +450,39 @@ func (e *Executor) RunningAgents() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// InjectMessage delivers a steering message to a running agent. The message
+// is queued on the agent's inject channel and will be prepended to the prompt
+// for the agent's next iteration. This allows steer clients to influence
+// running agents without restarting them.
+//
+// Returns an error if the agent is not currently running.
+func (e *Executor) InjectMessage(agentName string, message string) error {
+	e.mu.Lock()
+	run, ok := e.runs[agentName]
+	e.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("agent %q is not running", agentName)
+	}
+
+	// Non-blocking send. If the buffer is full (32 messages), log a warning
+	// and drop the oldest message to make room.
+	select {
+	case run.injectCh <- message:
+		log.Printf("executor: injected message for agent %q (%d bytes)", agentName, len(message))
+	default:
+		// Channel full — drain one and retry
+		select {
+		case <-run.injectCh:
+		default:
+		}
+		run.injectCh <- message
+		log.Printf("executor: injected message for agent %q (dropped oldest, buffer was full)", agentName)
+	}
+
+	return nil
 }
 
 // OnIteration registers a callback invoked after each iteration completes.

@@ -263,9 +263,10 @@ func (s *Server) handleSteerSubscribe(conn net.Conn) {
 	s.mu.Unlock()
 }
 
-// handleSteerInject processes a steering message injection.
-// Currently logs the injection. Full message injection into running
-// agent conversations will be implemented in Phase 4 (steer TUI).
+// handleSteerInject processes a steering message injection by forwarding it
+// to the executor. The executor queues the message on the agent's inject
+// channel; the agent goroutine drains injected messages before each iteration
+// and prepends them to the prompt, allowing humans to steer the agent.
 func (s *Server) handleSteerInject(env *Envelope) {
 	var req SteerInjectRequest
 	if err := env.DecodePayload(&req); err != nil {
@@ -273,6 +274,15 @@ func (s *Server) handleSteerInject(env *Envelope) {
 		return
 	}
 	log.Printf("steer inject: agent=%s step=%s iter=%d msg=%q", req.AgentName, req.StepLabel, req.Iteration, req.Message)
+
+	if s.executor == nil {
+		log.Printf("steer inject: no executor configured, message dropped")
+		return
+	}
+
+	if err := s.executor.InjectMessage(req.AgentName, req.Message); err != nil {
+		log.Printf("steer inject: forward to executor failed: %v", err)
+	}
 }
 
 // pushState sends the current cluster state to all subscribed steer clients.

@@ -121,3 +121,80 @@ func TestSteerClientConnectionRefused(t *testing.T) {
 		t.Fatal("expected connection error")
 	}
 }
+
+// TestSteerClientReconnect verifies auto-reconnect: when the master
+// disconnects, the client reconnects and receives state again.
+// This matters because master restarts should not require manually
+// restarting every steer terminal.
+func TestSteerClientReconnect(t *testing.T) {
+	// Start first server
+	srv1, store1, cleanup1 := startTestServer(t)
+	store1.ApplyDefinitions([]AgentDef{
+		{Name: "builder", ID: "abc", Definition: "(defagent \"builder\" body)"},
+	})
+	addr := srv1.Addr()
+
+	// Connect client
+	client, err := NewSteerClient(addr)
+	if err != nil {
+		t.Fatalf("NewSteerClient: %v", err)
+	}
+	defer client.Close()
+
+	// Consume initial state
+	select {
+	case state := <-client.StateCh:
+		if len(state.Objects) != 1 {
+			t.Fatalf("expected 1 object, got %d", len(state.Objects))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for initial state")
+	}
+
+	// Stop first server — triggers disconnect
+	cleanup1()
+
+	// Wait for disconnect error
+	select {
+	case err := <-client.ErrCh:
+		if err == nil {
+			t.Fatal("expected disconnect error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for disconnect error")
+	}
+
+	// Start a new server on the same address
+	store2 := NewStore()
+	store2.ApplyDefinitions([]AgentDef{
+		{Name: "builder", ID: "abc", Definition: "(defagent \"builder\" body)"},
+		{Name: "tester", ID: "def", Definition: "(defagent \"tester\" body)"},
+	})
+	srv2 := NewServer(store2, addr)
+	go srv2.ListenAndServe()
+	defer srv2.Stop()
+
+	// Wait for listener
+	deadline := time.Now().Add(2 * time.Second)
+	for srv2.listener == nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Wait for reconnect signal
+	select {
+	case <-client.ReconnectCh:
+		// Good — reconnected
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for reconnect")
+	}
+
+	// Should receive new state from second server
+	select {
+	case state := <-client.StateCh:
+		if len(state.Objects) != 2 {
+			t.Fatalf("expected 2 objects after reconnect, got %d", len(state.Objects))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for state after reconnect")
+	}
+}

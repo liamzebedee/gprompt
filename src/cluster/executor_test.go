@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -342,6 +344,76 @@ func TestExecutorSnapshotCapsIterations(t *testing.T) {
 	}
 
 	exec.StopAll(2 * time.Second)
+}
+
+// TestExecutorInjectMessage verifies that injected messages are prepended
+// to the agent's prompt in the next iteration. This is the core steering
+// mechanism: a steer client sends a message, the executor queues it, and
+// the agent goroutine picks it up before calling claude.
+func TestExecutorInjectMessage(t *testing.T) {
+	store := NewStore()
+	seedAgent(store, "builder")
+
+	// Track prompts received by claude to verify injection
+	var prompts []string
+	var mu sync.Mutex
+	claudeFn := func(ctx context.Context, prompt string) (string, error) {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		mu.Unlock()
+		select {
+		case <-time.After(20 * time.Millisecond):
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	exec := NewExecutor(store, claudeFn)
+	methods := map[string]string{"work": "do some work"}
+	if err := exec.Start("builder", methods); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Let first iteration start
+	time.Sleep(5 * time.Millisecond)
+
+	// Inject a message
+	if err := exec.InjectMessage("builder", "focus on tests please"); err != nil {
+		t.Fatalf("InjectMessage: %v", err)
+	}
+
+	// Wait for the next iteration to pick up the injection
+	time.Sleep(60 * time.Millisecond)
+
+	exec.StopAll(2 * time.Second)
+
+	// At least one prompt should contain the injected message
+	mu.Lock()
+	defer mu.Unlock()
+
+	found := false
+	for _, p := range prompts {
+		if strings.Contains(p, "focus on tests please") && strings.Contains(p, "[Steering messages from human operator]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected at least one prompt to contain injected message; got prompts: %v", prompts)
+	}
+}
+
+// TestExecutorInjectMessageNonRunning verifies InjectMessage returns
+// an error for an agent that is not running.
+func TestExecutorInjectMessageNonRunning(t *testing.T) {
+	store := NewStore()
+	exec := NewExecutor(store, fakeClaude(0))
+
+	err := exec.InjectMessage("ghost", "hello")
+	if err == nil {
+		t.Fatal("expected error injecting into non-running agent")
+	}
 }
 
 func TestExecutorOnIteration(t *testing.T) {
