@@ -43,6 +43,7 @@ Commands:
   sort <field>        Sort items by: priority, due, status, created
   duplicate <id>      Duplicate an item as a new pending copy
   swap <id1> <id2>    Swap the position of two items in the list
+  move <id> <pos>     Move an item to a specific position (1-based)
   timeline            Show items grouped by due-date urgency
   group-by-tag        Show items grouped by tag
   archive             Move completed items to an archive file
@@ -615,6 +616,35 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Swapped #%d and #%d.\n", id1, id2)
+
+	case "move":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo move <id> <position>")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		pos, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid position: %s\n", os.Args[3])
+			os.Exit(1)
+		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Move(id, pos); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Moved #%d to position %d.\n", id, pos)
 
 	case "duplicate":
 		id := requireID()

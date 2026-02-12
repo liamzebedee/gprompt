@@ -4,6 +4,8 @@
 
 ## Completed
 
+- [x] Add `todo move <id> <position>` command to move an item to a specific position in the list (1-based index, shifts other items accordingly)
+
 - [x] Add `todo group-by-tag` command to display items grouped by their tags (alphabetically sorted, multi-tag items appear in each group, untagged items shown last)
 
 - [x] Add `todo duplicate <id>` command to create a new pending copy of an existing item (preserves title, priority, due date, tags, and note)
