@@ -225,9 +225,7 @@ On the right, you have your regular Claude Code view. And on the left, you've go
 
 You can swap into any agent to intercept and steer them by navigating that tree. 
 
-**What's different to most approaches** is that the tree allows you to explore all parts of your autonomous loops: an agent, a build loop, individual iterations of a loop. 
-
-For example, what if your build loop isn't working? Could we steer the loop prompt instead of just the loop iteration? Yes. We just jump one level up. 
+The tree is kind of useful. Because a lot of agentic team frameworks mainly focus on just a list of agents. But sometimes you want to steer just one iteration of a loop. Or maybe you want to steer the build prompt for the loop itself, like below-
 
 ```
 ┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
@@ -253,15 +251,46 @@ For example, what if your build loop isn't working? Could we steer the loop prom
 └───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Here we can issue commands to edit the prompt. We might even run simulations to test the prompt is better than the new one. On the right you see performance characteristics - imagine our AI as a Kaizen manufacturing system! Number of iterations, mean duration and standard deviation of each iteration's duration.
+How do we make this work? Well, here's our `agents.p`:
 
-How do we make this work? Well, we take inspiration from Kubernetes. We define a cluster of agents declaratively in source code (`.p` files). We spin them up by sending that definition to a cluster manager, which creates the agent processes and manages them. We login to the cluster and steer it by connecting to that cluster manager node. 
+```yaml
+# agents-team.p
+build:
+    Read BACKLOG.md, pick one item, build it out, git commit, then mark as complete.
+
+bugfix:
+    Read BUG_BACKLOG.md, pick one item, identify root cause, write unit test, implement fix, git commit, then mark as complete.
+
+releasemgmt:
+    Your job is to update changelog.md for any new changes.
+
+    changelog.md contains a list of changes like the following: 
+        # Changelog.
+        ## 1.0.0 (`6abfe2`)
+        * Did this
+        * Changed that.
+
+        ## 0.9.0 (`g2b28a7`)
+        * Did this
+        * Changed that.
+
+agent-builder:
+    loop(build)
+
+agent-bugfixer:
+    loop(bugfix)
+
+agent-release-manager:
+    loop(releasemgmt)
+```
+
+I won't get into the details but basically we define the shape of our agent team and then send that to a cluster which creates those agent processes and manages them. At any time, we can login to the cluster and steer. We don't have to manage processes ourselves or scaling.
 
 ```sh
-# Start cluster manager
+# Run cluster manager
 gcluster master
 
-# Deploy the agents
+# Deploy agents
 gcluster apply agents.p
 
 # Login and steer
@@ -270,11 +299,13 @@ gcluster steer agents.p # term 2
 gcluster steer agents.p # term 3
 ```
 
-If we think of another agent we need, we can simply add it to `agents.p` and re-run `gcluster apply agents.p`. It will be added to the cluster. 
+The beauty of this approach is we get access to multiple new things:
 
-
-
-## Scaling agent clusters (autonomous creation of subagents)
+ * We could measure agent throughput on tasks (build loops) and autoscale more agents of that type.
+ * We can steer at different levels (agent, loops, prompts)
+ * We can track when agents start their own subagents, and also gain observability into them 
+ * We can let AI write its own agent infrastructure definitions and prompts (since it's all code)
+ * We can deploy this cluster, let an AI basically evolve it, and at any point, we can hook into an interface and steer it
 
 
 

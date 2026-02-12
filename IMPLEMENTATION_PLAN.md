@@ -1,85 +1,41 @@
 # gcluster Implementation Plan
 
+## Current State
+
+Phases 0, 1, 2 (partial), and 3 are complete. The full apply flow works end-to-end: master listens on TCP, apply client parses `.p` files, extracts `agent-` definitions, computes stable IDs, sends to master, receives summary. State push to steer clients works. Graceful shutdown with persistence works. Next: Phase 2.3 (agent executor) and Phase 4 (steer TUI).
+
+---
+
 ## Completed
 
 ### Phase 0: Foundations and Reconciliation ✓
-- **0.1 Rename `run` to `master`** — DONE. Updated `gcluster/main.go` to use `master` subcommand per spec.
-- **0.2 StableID function** — DONE. Added `StableID()` to sexp package (full SHA-256 hex), factored out shared `stableHash()` used by both `StableID()` and `shortcode()`.
-- **0.3 ClusterObject model** — DONE. Created `cluster/object.go` with `ClusterObject`, `Revision`, `AgentDef`, `ApplySummary`, and `RunState` types.
-- **0.4 Network protocol** — DONE. Created `cluster/protocol.go` with JSON-over-TCP protocol types (`Envelope`, all message types, `NewEnvelope`/`DecodePayload` helpers).
+- **0.1 Rename `run` to `master`** — DONE.
+- **0.2 StableID function** — DONE.
+- **0.3 ClusterObject model** — DONE.
+- **0.4 Network protocol** — DONE.
 
 ### Phase 1: Cluster State and Persistence ✓
-- **1.1 In-memory store** — DONE. Created `cluster/store.go` with thread-safe `Store` (idempotent `ApplyDefinitions`, `GetAgent`, `ListAgents`, `SetRunState`, `LoadState`, `OnChange` callback). 12 comprehensive tests in `store_test.go`.
-- **1.2 Persistent storage** — DONE. Created `cluster/persist.go` with `SaveState`/`LoadState` (atomic writes via temp file + rename, corrupt file handling per spec). 5 tests in `persist_test.go`.
+- **1.1 In-memory store** — DONE. 12 tests in `store_test.go`.
+- **1.2 Persistent storage** — DONE. 5 tests in `persist_test.go`.
 
-**Testing:** All phases covered with comprehensive tests: `store_test.go` (12 tests), `protocol_test.go` (4 tests), `persist_test.go` (5 tests), plus `StableID` tests in `sexp_test.go`.
+### Phase 2: Master Process (partial) ✓
+- **2.1 TCP listener and connection handling** — DONE. `cluster/server.go` with `Server` type: `NewServer`, `ListenAndServe`, `Stop`, `Addr`. Dispatches by message type, supports concurrent connections. 7 tests in `server_test.go`.
+- **2.2 Apply handler** — DONE. Receives `apply_request`, calls `store.ApplyDefinitions()`, returns `apply_response`.
+- **2.4 State push to steer clients** — DONE. `Store.OnChange` wired to `pushState` which sends `steer_state` to all subscribed clients. Verified with multiple concurrent steer clients.
+- **2.5 Graceful shutdown** — DONE. SIGINT/SIGTERM handler persists state to disk, sends `shutdown_notice` to steer clients, stops listener. `cmdMaster` in `main.go`.
 
----
+### Phase 3: Apply Client ✓
+- **3.1 Parse and extract agent definitions** — DONE. `cmdApply` in `main.go`: parses `.p` file, registers all methods (stdlib + imports + file), filters `agent-` prefixed definitions, emits S-expressions via `sexp.EmitProgram`, computes `sexp.StableID`.
+- **3.2 Send to master and print summary** — DONE. Connects to master TCP, sends `apply_request`, receives `apply_response`, prints summary with created/updated/unchanged counts. Clear error on connection refused.
 
-## Current State
-
-Phases 0 and 1 are complete. The cluster state store, persistence layer, and protocol definitions are ready. Next: implement the master TCP server and agent execution.
-
----
-
-## Phase 0: Foundations and Reconciliation — DONE ✓
-
-### 0.1 Rename `run` subcommand to `master` ✓
-- **File:** `src/cmd/gcluster/main.go`
-- **Status:** DONE. Subcommand renamed to `master` per spec.
-
-### 0.2 Extend sexp hashing to full SHA-256 ✓
-- **File:** `src/sexp/sexp.go`
-- **Status:** DONE. Added `StableID(sexpr string) string` returning full SHA-256 hex. Factored out `stableHash()` shared with `shortcode()`.
-
-### 0.3 Define the `ClusterObject` data model ✓
-- **File:** `src/cluster/object.go`
-- **Status:** DONE. Created with `ClusterObject`, `Revision`, `AgentDef`, `ApplySummary`, and `RunState` types per spec.
-
-### 0.4 Define the network protocol ✓
-- **File:** `src/cluster/protocol.go`
-- **Status:** DONE. JSON-over-TCP protocol with `Envelope`, all message types (`apply_request`, `apply_response`, `steer_subscribe`, `steer_state`, `steer_inject`, `shutdown_notice`), and helper functions (`NewEnvelope`, `DecodePayload`).
+**Testing:** 28 total tests passing: `store_test.go` (12), `protocol_test.go` (4), `persist_test.go` (5), `server_test.go` (7).
 
 ---
 
-## Phase 1: Cluster State and Persistence — DONE ✓
+## Remaining Work
 
-### 1.1 In-memory cluster state store ✓
-- **File:** `src/cluster/store.go`
-- **Status:** DONE. Thread-safe `Store` with all required methods:
-  - `ApplyDefinitions([]AgentDef) -> ApplySummary` — idempotent upsert logic (same SHA-256 = unchanged, changed = new revision)
-  - `GetAgent(name) -> ClusterObject`
-  - `ListAgents() -> []ClusterObject`
-  - `SetRunState(name, state)`
-  - `LoadState(state)` — restore from disk
-  - `OnChange(callback)` — subscribe to state mutations
-- **Testing:** 12 comprehensive tests in `store_test.go` covering idempotency, revision tracking, concurrency, and edge cases.
-
-### 1.2 Persistent storage (disk) ✓
-- **File:** `src/cluster/persist.go`
-- **Status:** DONE. `SaveState`/`LoadState` functions with atomic writes (temp file + rename), corrupt file handling (start fresh with warning, preserve old file for debugging).
-- **Testing:** 5 tests in `persist_test.go` covering round-trip, corruption handling, atomic writes, and directory creation.
-
----
-
-## Phase 2: Master Process
-
-### 2.1 TCP listener and connection handling
-- **File:** `src/cmd/gcluster/main.go` (master subcommand)
-- **New file:** `src/cluster/server.go`
-- **What:**
-  - Listen on `127.0.0.1:43252`
-  - Accept connections, read newline-delimited JSON messages
-  - Dispatch to handler based on message type
-  - Maintain a set of connected steer clients for push updates
-  - Clear error if port is already in use
-
-### 2.2 Apply handler (server side)
-- **File:** `src/cluster/server.go`
-- **What:** Receive `apply_request`, deserialize agent definitions, call `store.ApplyDefinitions()`, return `apply_response` with summary.
-
-### 2.3 Agent execution manager
-- **New file:** `src/cluster/executor.go`
+### Phase 2.3: Agent Execution Manager
+- **File:** `src/cluster/executor.go`
 - **What:**
   - When an agent transitions to `running`, spawn execution in a managed goroutine
   - Wrap the runtime's existing prompt/pipeline/loop execution
@@ -87,156 +43,27 @@ Phases 0 and 1 are complete. The cluster state store, persistence layer, and pro
   - Support stopping agents (send interrupt, wait for cleanup)
   - On `claude` CLI failure mid-iteration: record error, keep agent running, proceed to next iteration
 - **Reuse:** `runtime/runtime.go` — `callClaude()`, loop execution logic. Factor out the core so it can be called from both `gprompt` and `gcluster master`.
+- **Design notes:** The `runtime.callClaude` is unexported. Need to either export it or create a new execution function in the runtime package that the executor can call. Consider adding `runtime.ExecutePromptCapture` or similar.
 
-### 2.4 State push to steer clients
-- **File:** `src/cluster/server.go`
-- **What:** After any state mutation (apply, run state change, new loop iteration), push state to all subscribed steer clients.
+### Phase 4: Steer TUI
+- **4.1 Choose and integrate TUI framework** — `github.com/charmbracelet/bubbletea` + `lipgloss`
+- **4.2 Network client for steer** — Connect to master, subscribe, receive state pushes, send inject
+- **4.3 Tree sidebar** — Navigable tree of agents/loops/iterations
+- **4.4 Detail view** — Agent/loop/iteration views
+- **4.5 Message injection** — Input box in iteration view, sends `steer_inject`
 
-### 2.5 Graceful shutdown
-- **File:** `src/cmd/gcluster/main.go` (master subcommand)
-- **What:**
-  - Trap SIGINT/SIGTERM
-  - Stop all running agents (interrupt, wait with timeout)
-  - Persist state to disk
-  - Send `shutdown_notice` to all connected clients
-  - Close listener, exit
+### Phase 5: Polish and Edge Cases
+- Idempotency verification, persistence verification, concurrent steer sessions, terminal resize, error handling polish
 
 ---
 
-## Phase 3: Apply Client
+## Key Architecture Decisions
 
-### 3.1 Parse and extract agent definitions
-- **File:** `src/cmd/gcluster/main.go` (apply subcommand)
-- **What:**
-  - Parse `.p` file with existing parser
-  - Register all methods (agents reference non-agent methods like `build`)
-  - Filter for `agent-` prefixed definitions
-  - Compile each to S-expression via sexp package
-  - Compute stable ID via `StableID()` from 0.2
-  - Include referenced non-agent method definitions in the payload (agents call them at execution time)
-  - All-or-nothing: if parse fails, print error and exit nonzero. Nothing sent.
-- **Reuse:** `parser/parser.go`, `sexp/sexp.go`, `registry/registry.go`, `compiler/compiler.go`
-
-### 3.2 Send to master and print summary
-- **File:** `src/cmd/gcluster/main.go` (apply subcommand)
-- **What:**
-  - Connect to `127.0.0.1:43252`
-  - Send `apply_request` with agent definitions and supporting methods
-  - Receive `apply_response`
-  - Print summary: N created, N updated, N unchanged
-  - Clear error on connection refused: "cannot connect to master at 127.0.0.1:43252 — is `gcluster master` running?"
-  - Exit nonzero on failure
+- **Server uses port 0 in tests** for parallel-safe testing (no port conflicts)
+- **Apply client uses `sexp.EmitProgram` with filter** to emit individual agent S-expressions, then `sexp.StableID` for hashing
+- **State push is wired via `Store.OnChange`** callback → `Server.pushState` → writes to all steer client connections
+- **`--addr` and `--state` flags** added to both `master` and `apply` commands for testing flexibility
 
 ---
 
-## Phase 4: Steer TUI
-
-### 4.1 Choose and integrate TUI framework
-- **Recommended:** `github.com/charmbracelet/bubbletea` with `github.com/charmbracelet/lipgloss` for styling.
-- **Rationale:** Best Go TUI ergonomics (Elm architecture), good split pane support, active maintenance.
-
-### 4.2 Network client for steer
-- **New file:** `src/cluster/steer_client.go`
-- **What:**
-  - Connect to master on `127.0.0.1:43252`
-  - Send `steer_subscribe`
-  - Read state updates in a goroutine, feed into bubbletea as messages
-  - Handle disconnect: show banner, attempt reconnect with backoff
-  - Send `steer_inject` when user injects a message
-  - Clear error on master not running (same as apply)
-
-### 4.3 Tree sidebar (left pane)
-- **What:**
-  - Render navigable tree of all agents from cluster state
-  - Each agent node expands to show loop steps, each step expands to show iterations (max 4 most recent, latest first in bold)
-  - Navigation: up/down arrows move highlight, left/right collapse/expand
-  - Search: text input at top filters tree by name
-  - Live updates: new iterations appear in tree within 1 second without refresh
-
-### 4.4 Detail view (right pane)
-- **What:** Render based on selected tree node type:
-  - **AgentView:** Reserved for future agent-level metadata (currently empty per spec)
-  - **LoopView:** Two columns — prompt text (80%) + stats (20%): iterations, mean/stddev duration, mean/stddev tokens
-  - **LoopIterationView:** Full chat message history, scrollable. Input box at bottom for message injection.
-- **Live updates:** Refresh when new data arrives for the currently selected item
-
-### 4.5 Message injection
-- **What:**
-  - In LoopIterationView, input box at bottom for steering messages
-  - On submit, send `steer_inject` to master
-  - Master injects message into agent's conversation
-  - Both sending and receiving clients see the message reflected in chat history
-
----
-
-## Phase 5: Polish and Edge Cases
-
-### 5.1 Idempotency verification
-- Test: apply same file twice, verify no new revisions created and no errors.
-- Test: change one agent's body, reapply, verify only that agent gets a new revision.
-
-### 5.2 Persistence verification
-- Test: apply agents, stop master, restart, verify agents survive.
-- Test: corrupt state file, verify master starts fresh with warning.
-
-### 5.3 Concurrent steer sessions
-- Test: two steer terminals see same cluster state.
-- Test: two users steer the same iteration, both messages delivered in arrival order.
-
-### 5.4 Terminal resize handling
-- TUI reflows on resize without crashing or corrupting display.
-
-### 5.5 Error handling polish
-- Master not running → clear connection error for both apply and steer
-- Port already in use → clear error naming port
-- Agent references undefined method → compile error, apply fails
-- Very long chat history → scrollable, not truncated
-
----
-
-## Dependency Graph
-
-```
-Phase 0 (foundations)
-  0.1 rename run -> master
-  0.2 full SHA-256
-  0.3 ClusterObject model
-  0.4 protocol definition
-    ↓
-Phase 1 (state)              Phase 3 (apply client)
-  1.1 in-memory store          3.1 parse + extract  [needs 0.2, 0.3]
-  1.2 persistence              3.2 send + print     [needs 0.4, 3.1]
-    ↓
-Phase 2 (master)
-  2.1 TCP listener           [needs 0.4]
-  2.2 apply handler          [needs 1.1, 2.1]
-  2.3 executor               [needs 1.1, runtime.go]
-  2.4 state push             [needs 2.1, 1.1]
-  2.5 graceful shutdown      [needs 2.1, 2.3, 1.2]
-    ↓
-Phase 4 (steer TUI)
-  4.1 framework choice
-  4.2 network client         [needs 0.4]
-  4.3 tree sidebar           [needs 4.1, 4.2]
-  4.4 detail view            [needs 4.3]
-  4.5 message injection      [needs 4.2, 4.4]
-    ↓
-Phase 5 (polish)             [needs all above]
-```
-
-## Reuse Summary
-
-| Existing Package | Reused In | How |
-|---|---|---|
-| `parser/parser.go` | Phase 3 (apply) | Parse `.p` files, extract `agent-` definitions |
-| `sexp/sexp.go` | Phase 0.2, Phase 3 | Canonical S-expression emission, SHA-256 stable IDs |
-| `pipeline/pipeline.go` | Phase 2.3 (executor) | Pipeline structure for agent loop definitions |
-| `compiler/compiler.go` | Phase 3 (apply) | Compile parsed nodes to Plans |
-| `runtime/runtime.go` | Phase 2.3 (executor) | Execute prompts and loops via `claude` CLI |
-| `registry/registry.go` | Phase 2.3 (executor), Phase 3 | Method resolution during execution and apply |
-| `stdlib/stdlib.go` | Phase 2.3 (executor) | Standard library definitions |
-| `debug/debug.go` | All phases | Debug logging throughout |
-
----
-
-*Generated 2026-02-12. Reflects specs in `specs/cli/gcluster/` and `specs/concepts/gcluster.md` against source in `src/`.*
+*Updated 2026-02-12. Reflects completed Phases 0-3 and Phase 2 (partial).*

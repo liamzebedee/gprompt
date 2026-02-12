@@ -151,9 +151,6 @@ func ExecutePipeline(ctx context.Context, p *pipeline.Pipeline, args map[string]
 			for {
 				iteration++
 				prompt := method.Body
-				if prevOutput != "" {
-					prompt = prevOutput + "\n\n" + prompt
-				}
 
 				debug.LogPrompt(fmt.Sprintf("PIPELINE LOOP %d iter %d: %s", stepNum, iteration, step.LoopMethod), stepNum, prompt)
 
