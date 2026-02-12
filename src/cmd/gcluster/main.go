@@ -15,7 +15,9 @@ import (
 
 	"p2p/cluster"
 	"p2p/parser"
+	"p2p/pipeline"
 	"p2p/registry"
+	"p2p/runtime"
 	"p2p/sexp"
 	"p2p/stdlib"
 )
@@ -75,8 +77,8 @@ func cmdMaster(args []string) {
 	store := cluster.NewStore()
 	cluster.LoadState(store, statePath)
 
-	// Create and start server
-	srv := cluster.NewServer(store, addr)
+	// Create and start server with executor using the real claude CLI.
+	srv := cluster.NewServer(store, addr, runtime.CallClaudeCapture)
 
 	// Handle shutdown signals
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -167,7 +169,8 @@ func cmdApply(args []string) {
 		}
 	}
 
-	// Extract agent- prefixed definitions and compile to AgentDefs
+	// Extract agent- prefixed definitions, compile to AgentDefs,
+	// and resolve method bodies for executor use.
 	var agentDefs []cluster.AgentDef
 	for _, node := range nodes {
 		if node.Type != parser.NodeMethodDef {
@@ -187,10 +190,16 @@ func cmdApply(args []string) {
 		agentName := strings.TrimPrefix(node.Name, "agent-")
 		stableID := sexp.StableID(sexpr)
 
+		// Resolve method bodies referenced by the agent's pipeline.
+		// The executor needs these to construct prompts without accessing
+		// the parser or source files.
+		methods := resolveAgentMethods(node, reg)
+
 		agentDefs = append(agentDefs, cluster.AgentDef{
 			Name:       agentName,
 			Definition: sexpr,
 			ID:         stableID,
+			Methods:    methods,
 		})
 	}
 
@@ -311,6 +320,48 @@ func loadStdlib(reg *registry.Registry, inputFile string) {
 			reg.Register(n.Name, n.Params, n.Body)
 		}
 	}
+}
+
+// resolveAgentMethods extracts the method bodies referenced by an agent's
+// pipeline steps. For a loop(build) agent, this returns {"build": "<body>"}.
+// The executor uses these to construct prompts at runtime.
+func resolveAgentMethods(node parser.Node, reg *registry.Registry) map[string]string {
+	methods := make(map[string]string)
+
+	// Check if the agent body is a pipeline.
+	if !pipeline.IsPipeline(node.Body) {
+		// Non-pipeline agent: the body itself is the prompt.
+		methods[node.Name] = node.Body
+		return methods
+	}
+
+	// Parse the pipeline to find referenced methods.
+	p, err := pipeline.Parse(node.Body)
+	if err != nil {
+		// Fallback: use body as prompt.
+		methods[node.Name] = node.Body
+		return methods
+	}
+
+	for _, step := range p.Steps {
+		var methodName string
+		switch step.Kind {
+		case pipeline.StepSimple:
+			methodName = step.Method
+		case pipeline.StepLoop:
+			methodName = step.LoopMethod
+		case pipeline.StepMap:
+			methodName = step.MapMethod
+		}
+		if methodName != "" {
+			m := reg.Get(methodName)
+			if m != nil {
+				methods[methodName] = m.Body
+			}
+		}
+	}
+
+	return methods
 }
 
 func resolveImport(importPath string, baseDir string) string {

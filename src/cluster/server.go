@@ -19,12 +19,15 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // Server is the gcluster master TCP server. It owns the Store, manages
-// client connections, and pushes state updates to subscribed steer clients.
+// client connections, pushes state updates to subscribed steer clients,
+// and drives agent execution via the Executor.
 type Server struct {
 	store    *Store
+	executor *Executor
 	listener net.Listener
 	addr     string
 
@@ -32,13 +35,21 @@ type Server struct {
 	mu           sync.Mutex
 	steerClients map[net.Conn]bool
 
+	// agentMethods caches the resolved method bodies for each agent,
+	// keyed by agent name → (method name → method body). Populated
+	// by apply requests so the executor can start agents.
+	agentMethods map[string]map[string]string
+
 	// done is closed when the server stops
 	done chan struct{}
 }
 
 // NewServer creates a server bound to the given store.
+// If claudeFn is non-nil, an executor is created to manage agent goroutines.
+// If claudeFn is nil, agents are stored but not executed (useful for tests
+// that don't need execution).
 // Call ListenAndServe to start accepting connections.
-func NewServer(store *Store, addr string) *Server {
+func NewServer(store *Store, addr string, claudeFn ...ClaudeFunc) *Server {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -46,7 +57,13 @@ func NewServer(store *Store, addr string) *Server {
 		store:        store,
 		addr:         addr,
 		steerClients: make(map[net.Conn]bool),
+		agentMethods: make(map[string]map[string]string),
 		done:         make(chan struct{}),
+	}
+
+	// Create executor if a claude function was provided.
+	if len(claudeFn) > 0 && claudeFn[0] != nil {
+		s.executor = NewExecutor(store, claudeFn[0])
 	}
 
 	// Wire up state change notifications to push to steer clients.
@@ -82,6 +99,11 @@ func (s *Server) ListenAndServe() error {
 	}
 }
 
+// Executor returns the server's executor, or nil if none was configured.
+func (s *Server) Executor() *Executor {
+	return s.executor
+}
+
 // Addr returns the listener's address, useful in tests where port 0 is used.
 func (s *Server) Addr() string {
 	if s.listener != nil {
@@ -90,8 +112,8 @@ func (s *Server) Addr() string {
 	return s.addr
 }
 
-// Stop gracefully shuts down the server: closes the listener, sends
-// shutdown notices to steer clients, and cleans up connections.
+// Stop gracefully shuts down the server: stops running agents, closes
+// the listener, sends shutdown notices to steer clients, and cleans up.
 func (s *Server) Stop() {
 	select {
 	case <-s.done:
@@ -99,6 +121,11 @@ func (s *Server) Stop() {
 	default:
 	}
 	close(s.done)
+
+	// Stop all running agents before closing connections.
+	if s.executor != nil {
+		s.executor.StopAll(10 * time.Second)
+	}
 
 	if s.listener != nil {
 		s.listener.Close()
@@ -158,7 +185,8 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 // handleApply processes an apply_request: deserializes agent definitions,
-// applies them to the store, and sends back the summary.
+// applies them to the store, starts any pending agents, and sends back
+// the summary.
 func (s *Server) handleApply(conn net.Conn, env *Envelope) {
 	var req ApplyRequest
 	if err := env.DecodePayload(&req); err != nil {
@@ -166,8 +194,28 @@ func (s *Server) handleApply(conn net.Conn, env *Envelope) {
 		return
 	}
 
+	// Cache method bodies from the apply request for executor use.
+	s.mu.Lock()
+	for _, def := range req.Agents {
+		if len(def.Methods) > 0 {
+			s.agentMethods[def.Name] = def.Methods
+		}
+	}
+	s.mu.Unlock()
+
 	summary := s.store.ApplyDefinitions(req.Agents)
 	s.sendResponse(conn, MsgApplyResponse, ApplyResponse{Summary: summary})
+
+	// Start any newly-created (pending) agents if we have an executor.
+	if s.executor != nil {
+		s.mu.Lock()
+		methods := make(map[string]map[string]string, len(s.agentMethods))
+		for k, v := range s.agentMethods {
+			methods[k] = v
+		}
+		s.mu.Unlock()
+		s.executor.StartPending(methods)
+	}
 }
 
 // handleSteerSubscribe registers a connection for state push updates.
@@ -207,7 +255,8 @@ func (s *Server) handleSteerSubscribe(conn net.Conn) {
 }
 
 // handleSteerInject processes a steering message injection.
-// TODO: Forward to executor when Phase 2.3 is implemented.
+// Currently logs the injection. Full message injection into running
+// agent conversations will be implemented in Phase 4 (steer TUI).
 func (s *Server) handleSteerInject(env *Envelope) {
 	var req SteerInjectRequest
 	if err := env.DecodePayload(&req); err != nil {
@@ -215,7 +264,6 @@ func (s *Server) handleSteerInject(env *Envelope) {
 		return
 	}
 	log.Printf("steer inject: agent=%s step=%s iter=%d msg=%q", req.AgentName, req.StepLabel, req.Iteration, req.Message)
-	// Executor integration happens in Phase 2.3
 }
 
 // pushState sends the current cluster state to all subscribed steer clients.

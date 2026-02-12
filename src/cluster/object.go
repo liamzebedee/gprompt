@@ -47,7 +47,8 @@ type ClusterObject struct {
 }
 
 // AgentDef is the payload for an agent definition sent from apply to master.
-// It contains all the information needed to create or update a ClusterObject.
+// It contains all the information needed to create or update a ClusterObject
+// and to start execution.
 type AgentDef struct {
 	// Name is the agent name (without "agent-" prefix).
 	Name string `json:"name"`
@@ -55,6 +56,13 @@ type AgentDef struct {
 	Definition string `json:"definition"`
 	// ID is the full SHA-256 hex of the definition.
 	ID string `json:"id"`
+	// Methods maps method name to resolved method body text. These are the
+	// method bodies referenced by the agent's pipeline steps, fully resolved
+	// at apply time. For a loop(build) agent, this would be:
+	//   {"build": "Read BACKLOG.md, pick one item, ..."}
+	// The executor uses these to construct prompts without needing access to
+	// the parser, registry, or source files.
+	Methods map[string]string `json:"methods,omitempty"`
 }
 
 // ApplySummary reports the outcome of an apply operation.

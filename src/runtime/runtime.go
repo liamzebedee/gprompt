@@ -75,7 +75,7 @@ func ExecutePipeline(ctx context.Context, p *pipeline.Pipeline, args map[string]
 			if isLast {
 				result, err = callClaude(ctx, prompt)
 			} else {
-				result, err = callClaudeCapture(ctx, prompt)
+				result, err = CallClaudeCapture(ctx, prompt)
 			}
 			if err != nil {
 				return fmt.Errorf("step %d (%s): %w", stepNum, step.Label, err)
@@ -116,7 +116,7 @@ func ExecutePipeline(ctx context.Context, p *pipeline.Pipeline, args map[string]
 				go func(idx int) {
 					defer wg.Done()
 
-					result, err := callClaudeCapture(mapCtx, prompts[idx])
+					result, err := CallClaudeCapture(mapCtx, prompts[idx])
 
 					mu.Lock()
 					defer mu.Unlock()
@@ -338,9 +338,10 @@ func callClaude(ctx context.Context, prompt string) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-// callClaudeCapture runs claude -p, capturing output silently (no stdout streaming).
+// CallClaudeCapture runs claude -p, capturing output silently (no stdout streaming).
 // In debug mode, uses stream-json to show live token meter.
-func callClaudeCapture(ctx context.Context, prompt string) (string, error) {
+// Exported for use by the cluster executor.
+func CallClaudeCapture(ctx context.Context, prompt string) (string, error) {
 	if debug.Enabled {
 		return callClaudeStream(ctx, prompt)
 	}
