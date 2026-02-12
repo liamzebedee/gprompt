@@ -6,9 +6,9 @@ import (
 )
 
 var commands = map[string]func(args []string){
-	"apply": cmdApply,
-	"run":   cmdRun,
-	"steer": cmdSteer,
+	"apply":  cmdApply,
+	"master": cmdMaster,
+	"steer":  cmdSteer,
 }
 
 func main() {
@@ -26,7 +26,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: gcluster <command> [args...]\n\ncommands:\n  apply   Apply a cluster configuration\n  run     Run a cluster\n  steer   Steer a running cluster\n")
+	fmt.Fprintf(os.Stderr, "usage: gcluster <command> [args...]\n\ncommands:\n  apply    Apply agent definitions from a .p file\n  master   Start the cluster control plane\n  steer    Open the steering TUI\n")
 	os.Exit(1)
 }
 
@@ -34,8 +34,8 @@ func cmdApply(args []string) {
 	fmt.Println("gcluster apply: not implemented yet")
 }
 
-func cmdRun(args []string) {
-	fmt.Println("gcluster run: not implemented yet")
+func cmdMaster(args []string) {
+	fmt.Println("gcluster master: not implemented yet")
 }
 
 func cmdSteer(args []string) {

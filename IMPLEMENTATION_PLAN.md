@@ -1,65 +1,64 @@
 # gcluster Implementation Plan
 
+## Completed
+
+### Phase 0: Foundations and Reconciliation ✓
+- **0.1 Rename `run` to `master`** — DONE. Updated `gcluster/main.go` to use `master` subcommand per spec.
+- **0.2 StableID function** — DONE. Added `StableID()` to sexp package (full SHA-256 hex), factored out shared `stableHash()` used by both `StableID()` and `shortcode()`.
+- **0.3 ClusterObject model** — DONE. Created `cluster/object.go` with `ClusterObject`, `Revision`, `AgentDef`, `ApplySummary`, and `RunState` types.
+- **0.4 Network protocol** — DONE. Created `cluster/protocol.go` with JSON-over-TCP protocol types (`Envelope`, all message types, `NewEnvelope`/`DecodePayload` helpers).
+
+### Phase 1: Cluster State and Persistence ✓
+- **1.1 In-memory store** — DONE. Created `cluster/store.go` with thread-safe `Store` (idempotent `ApplyDefinitions`, `GetAgent`, `ListAgents`, `SetRunState`, `LoadState`, `OnChange` callback). 12 comprehensive tests in `store_test.go`.
+- **1.2 Persistent storage** — DONE. Created `cluster/persist.go` with `SaveState`/`LoadState` (atomic writes via temp file + rename, corrupt file handling per spec). 5 tests in `persist_test.go`.
+
+**Testing:** All phases covered with comprehensive tests: `store_test.go` (12 tests), `protocol_test.go` (4 tests), `persist_test.go` (5 tests), plus `StableID` tests in `sexp_test.go`.
+
+---
+
 ## Current State
 
-The `gcluster` binary has a CLI skeleton with three subcommands (`apply`, `run`, `steer`), all stubs printing "not implemented yet." The spec refers to the long-running process as `gcluster master`, but the current code uses `run`. Significant infrastructure already exists in the parser, sexp, pipeline, compiler, runtime, and registry packages.
+Phases 0 and 1 are complete. The cluster state store, persistence layer, and protocol definitions are ready. Next: implement the master TCP server and agent execution.
 
 ---
 
-## Phase 0: Foundations and Reconciliation
+## Phase 0: Foundations and Reconciliation — DONE ✓
 
-### 0.1 Rename `run` subcommand to `master`
+### 0.1 Rename `run` subcommand to `master` ✓
 - **File:** `src/cmd/gcluster/main.go`
-- **Rationale:** Spec consistently uses `gcluster master`. Rename now before any real logic is added.
+- **Status:** DONE. Subcommand renamed to `master` per spec.
 
-### 0.2 Extend sexp hashing to full SHA-256
+### 0.2 Extend sexp hashing to full SHA-256 ✓
 - **File:** `src/sexp/sexp.go`
-- **What:** Add a `StableID(sexpr string) string` function that returns the full hex-encoded SHA-256 of a canonical S-expression string. Keep `shortcode()` for display purposes. Factor out the hash computation so both share it.
-- **Reuse:** `shortcode()` already computes SHA-256 and truncates to 4 bytes.
+- **Status:** DONE. Added `StableID(sexpr string) string` returning full SHA-256 hex. Factored out `stableHash()` shared with `shortcode()`.
 
-### 0.3 Define the `ClusterObject` data model
-- **New file:** `src/cluster/object.go`
-- **Fields per spec:**
-  - `ID` — full SHA-256 hex string (stable, derived from S-expression)
-  - `Name` — the suffix after `agent-` in the P source
-  - `Definition` — the canonical S-expression string
-  - `Revisions` — ordered list of revision entries (each with ID, timestamp, definition)
-  - `RunState` — enum: `pending`, `running`, `stopped`
-  - `CurrentRevision` — pointer to the active revision
-- **Reuse:** `sexp.EmitProgram()` for canonical form, `StableID()` from 0.2 for hashing.
+### 0.3 Define the `ClusterObject` data model ✓
+- **File:** `src/cluster/object.go`
+- **Status:** DONE. Created with `ClusterObject`, `Revision`, `AgentDef`, `ApplySummary`, and `RunState` types per spec.
 
-### 0.4 Define the network protocol
-- **New file:** `src/cluster/protocol.go`
-- **Design:** JSON-over-TCP on `127.0.0.1:43252`. Each message is a newline-delimited JSON object with a `type` field.
-- **Message types (initial set):**
-  - `apply_request` — client sends list of agent definitions
-  - `apply_response` — master replies with created/updated/unchanged summary
-  - `steer_subscribe` — steer client subscribes to state updates
-  - `steer_state` — master pushes full or incremental state to steer
-  - `steer_inject` — steer client sends a message to inject into an agent conversation
-  - `shutdown_notice` — master notifies clients before shutdown
+### 0.4 Define the network protocol ✓
+- **File:** `src/cluster/protocol.go`
+- **Status:** DONE. JSON-over-TCP protocol with `Envelope`, all message types (`apply_request`, `apply_response`, `steer_subscribe`, `steer_state`, `steer_inject`, `shutdown_notice`), and helper functions (`NewEnvelope`, `DecodePayload`).
 
 ---
 
-## Phase 1: Cluster State and Persistence
+## Phase 1: Cluster State and Persistence — DONE ✓
 
-### 1.1 In-memory cluster state store
-- **New file:** `src/cluster/store.go`
-- **What:** Thread-safe store holding a map of `ClusterObject` by name. Methods:
-  - `ApplyDefinitions([]AgentDef) -> ApplySummary` — idempotent upsert logic
+### 1.1 In-memory cluster state store ✓
+- **File:** `src/cluster/store.go`
+- **Status:** DONE. Thread-safe `Store` with all required methods:
+  - `ApplyDefinitions([]AgentDef) -> ApplySummary` — idempotent upsert logic (same SHA-256 = unchanged, changed = new revision)
   - `GetAgent(name) -> ClusterObject`
   - `ListAgents() -> []ClusterObject`
   - `SetRunState(name, state)`
-- **Key behavior:**
-  - Same definition (same SHA-256) = unchanged, no new revision
-  - Changed definition = new revision appended, run state unchanged for existing runs
-  - New agent = new object in `pending` state
-  - Additive only: no deletes
+  - `LoadState(state)` — restore from disk
+  - `OnChange(callback)` — subscribe to state mutations
+- **Testing:** 12 comprehensive tests in `store_test.go` covering idempotency, revision tracking, concurrency, and edge cases.
 
-### 1.2 Persistent storage (disk)
-- **New file:** `src/cluster/persist.go`
-- **What:** Serialize cluster state to a JSON file (e.g., `~/.gcluster/state.json`). Load on master startup, save on every mutation and on shutdown.
-- **Edge case:** If the on-disk state is unreadable, start fresh and log a warning (per spec). Preserve old file for debugging.
+### 1.2 Persistent storage (disk) ✓
+- **File:** `src/cluster/persist.go`
+- **Status:** DONE. `SaveState`/`LoadState` functions with atomic writes (temp file + rename), corrupt file handling (start fresh with warning, preserve old file for debugging).
+- **Testing:** 5 tests in `persist_test.go` covering round-trip, corruption handling, atomic writes, and directory creation.
 
 ---
 

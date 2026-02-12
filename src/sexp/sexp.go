@@ -155,7 +155,19 @@ func indent(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// stableHash returns the full SHA-256 hash of an S-expression string.
+func stableHash(sexpr string) [32]byte {
+	return sha256.Sum256([]byte(sexpr))
+}
+
+// StableID returns the full hex-encoded SHA-256 of a canonical S-expression string.
+// This is used as the persistent identity for cluster objects.
+func StableID(sexpr string) string {
+	h := stableHash(sexpr)
+	return fmt.Sprintf("%x", h[:])
+}
+
 func shortcode(sexpr string) string {
-	h := sha256.Sum256([]byte(sexpr))
+	h := stableHash(sexpr)
 	return fmt.Sprintf("%x", h[:4])
 }

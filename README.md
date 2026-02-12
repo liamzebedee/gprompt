@@ -195,9 +195,7 @@ agent-release-manager:
     loop(releasemgmt)
 ```
 
-And then run `start agents.p` and it starts them all up.
-
-Something like this:
+And then run `start agents.p` and it starts them all up and shows a UI like this:
 
 ```txt
 ┌───────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
@@ -223,15 +221,9 @@ Something like this:
 └───────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
 ```
 
-On the right, you've got something new - it's a tree of contexts. And on the right, you have your regular Claude Code view. 
+On the right, you have your regular Claude Code view. And on the left, you've got something new - it's a tree of contexts. 
 
-You can swap into any agent to intercept and steer them. 
-
-Or you could just have a look.
-
-Steering might happen at different levels too. Just like how software sometimes has bugs at different levels - we want to drop into different agents, subagents, and prompts.
-
-That's why we want to see a tree of contexts, not just a list of agents.
+You can swap into any agent to intercept and steer them by navigating that tree. 
 
 **What's different to most approaches** is that the tree allows you to explore all parts of your autonomous loops: an agent, a build loop, individual iterations of a loop. 
 

@@ -192,3 +192,38 @@ func TestTrailingText(t *testing.T) {
 		t.Error("missing trailing text")
 	}
 }
+
+func TestStableIDFullSHA256(t *testing.T) {
+	sexpr := `(defagent "watcher" (pipeline (step "build" (loop build))))`
+
+	id := StableID(sexpr)
+
+	// Full SHA-256 is 64 hex characters.
+	if len(id) != 64 {
+		t.Fatalf("expected 64-char hex string, got %d chars: %s", len(id), id)
+	}
+
+	// Must be deterministic.
+	id2 := StableID(sexpr)
+	if id != id2 {
+		t.Error("StableID is not deterministic")
+	}
+
+	// Different input → different ID.
+	id3 := StableID(`(defagent "other" (pipeline (step "run" (loop run))))`)
+	if id == id3 {
+		t.Error("different S-expressions should produce different IDs")
+	}
+}
+
+func TestStableIDConsistentWithShortcode(t *testing.T) {
+	sexpr := `(defmethod foo () "do stuff")`
+
+	fullID := StableID(sexpr)
+	short := shortcode(sexpr)
+
+	// Shortcode should be the first 8 chars of the full ID.
+	if fullID[:8] != short {
+		t.Errorf("shortcode %s should be prefix of StableID %s", short, fullID)
+	}
+}
