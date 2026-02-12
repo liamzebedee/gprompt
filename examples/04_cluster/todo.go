@@ -100,6 +100,7 @@ type Item struct {
 	Priority  Priority  `json:"priority,omitempty"`
 	DueDate   DueDate   `json:"due_date,omitempty"`
 	Tags      []string  `json:"tags,omitempty"`
+	Note      string    `json:"note,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -324,6 +325,18 @@ func (s *Store) Edit(id int, newTitle string) error {
 	return nil
 }
 
+// SetNote sets or clears the note on an existing item.
+// Pass an empty string to clear the note.
+func (s *Store) SetNote(id int, note string) error {
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	item.Note = note
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
 // SetPriority updates the priority of an existing item.
 func (s *Store) SetPriority(id int, priority Priority) error {
 	if !ValidPriority(priority) {
@@ -527,6 +540,30 @@ func (s *Store) List(filter Status) ([]Item, error) {
 	var result []Item
 	for _, item := range s.Items {
 		if item.Status == filter {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+// ListWithTag returns items matching both the status filter and tag filter.
+// An empty status filter matches all statuses. The tag is validated and must
+// not be empty or whitespace-only. This combines the functionality of List and
+// ListByTag into a single call with proper validation of both filters.
+func (s *Store) ListWithTag(statusFilter Status, tag string) ([]Item, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, fmt.Errorf("tag filter must not be empty")
+	}
+	if statusFilter != "" && !ValidStatus(statusFilter) {
+		return nil, fmt.Errorf("invalid status filter: %q (valid values: pending, in_progress, done)", statusFilter)
+	}
+	var result []Item
+	for _, item := range s.Items {
+		if statusFilter != "" && item.Status != statusFilter {
+			continue
+		}
+		if item.HasTag(tag) {
 			result = append(result, item)
 		}
 	}

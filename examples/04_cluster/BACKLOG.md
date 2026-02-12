@@ -4,6 +4,8 @@
 
 ## Completed
 
+- [x] Add `todo note <id> <text>` command to set a free-text note on an item (displayed in `show`, clearable with `todo note <id> --clear`)
+
 - [x] Add `todo rename-tag <old> <new>` command to rename a tag across all items (case-insensitive, deduplicates)
 
 - [x] Add `todo archive` command to move completed items to a separate archive file (preserves history unlike `clear`)

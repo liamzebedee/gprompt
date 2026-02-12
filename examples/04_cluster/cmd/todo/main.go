@@ -32,6 +32,7 @@ Commands:
                       Set or clear an item's due date
   tag <id> <tag>      Add a tag to an item
   untag <id> <tag>    Remove a tag from an item
+  note <id> <text>    Set a note on an item (use --clear to remove)
   rename-tag <old> <new>
                       Rename a tag across all items
   search <query>      Search items by title substring
@@ -156,20 +157,16 @@ func main() {
 		if len(args) >= 1 {
 			filter = todo.Status(args[0])
 		}
-		items, err := store.List(filter)
+		var items []todo.Item
+		var err error
+		if tagFilter != "" {
+			items, err = store.ListWithTag(filter, tagFilter)
+		} else {
+			items, err = store.List(filter)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
-		}
-		// Apply tag filter if specified.
-		if tagFilter != "" {
-			var filtered []todo.Item
-			for _, item := range items {
-				if item.HasTag(tagFilter) {
-					filtered = append(filtered, item)
-				}
-			}
-			items = filtered
 		}
 		if len(items) == 0 {
 			fmt.Println("No items.")
@@ -347,6 +344,55 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Removed tag %q from #%d.\n", strings.ToLower(strings.TrimSpace(tag)), id)
+
+	case "note":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: todo note <id> <text>  (use --clear to remove)")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		var note string
+		if len(os.Args) >= 4 {
+			if os.Args[3] == "--clear" {
+				note = ""
+			} else {
+				note = strings.Join(os.Args[3:], " ")
+			}
+		} else {
+			// No text provided — show current note.
+			item, err := store.Get(id)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if item.Note == "" {
+				fmt.Printf("#%d has no note.\n", id)
+			} else {
+				fmt.Printf("#%d note: %s\n", id, item.Note)
+			}
+			return
+		}
+		if err := store.Snapshot(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating undo snapshot: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.SetNote(id, note); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		if note == "" {
+			fmt.Printf("Cleared note on #%d.\n", id)
+		} else {
+			fmt.Printf("Set note on #%d.\n", id)
+		}
 
 	case "rename-tag":
 		if len(os.Args) < 4 {
@@ -627,6 +673,11 @@ func printItemDetail(item *todo.Item, color bool) {
 		fmt.Printf("%s  -\n", todo.ColorLabel("Due:", color))
 	}
 	fmt.Printf("%s  %s\n", todo.ColorLabel("Tags:", color), todo.FormatTags(item.Tags))
+	if item.Note != "" {
+		fmt.Printf("%s  %s\n", todo.ColorLabel("Note:", color), item.Note)
+	} else {
+		fmt.Printf("%s  -\n", todo.ColorLabel("Note:", color))
+	}
 	fmt.Printf("%s  %s\n", todo.ColorLabel("Created:", color), item.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("%s  %s\n", todo.ColorLabel("Updated:", color), item.UpdatedAt.Format("2006-01-02 15:04:05"))
 }
