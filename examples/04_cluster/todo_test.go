@@ -162,7 +162,10 @@ func TestSearchFindsMatches(t *testing.T) {
 	_, _ = s.Add("Buy a new book")
 	_, _ = s.Add("Write tests")
 
-	results := s.Search("buy")
+	results, err := s.Search("buy")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -178,7 +181,10 @@ func TestSearchCaseInsensitive(t *testing.T) {
 
 	_, _ = s.Add("Deploy To Production")
 
-	results := s.Search("deploy to production")
+	results, err := s.Search("deploy to production")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -193,7 +199,10 @@ func TestSearchNoMatches(t *testing.T) {
 	_, _ = s.Add("Write docs")
 	_, _ = s.Add("Fix bug")
 
-	results := s.Search("deploy")
+	results, err := s.Search("deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
@@ -202,9 +211,27 @@ func TestSearchNoMatches(t *testing.T) {
 func TestSearchEmptyStore(t *testing.T) {
 	s := tempStore(t)
 
-	results := s.Search("anything")
+	results, err := s.Search("anything")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for empty store, got %d", len(results))
+	}
+}
+
+func TestSearchRejectsEmptyQuery(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("Task")
+
+	_, err := s.Search("")
+	if err == nil {
+		t.Fatal("expected error for empty search query, got nil")
+	}
+
+	_, err = s.Search("   ")
+	if err == nil {
+		t.Fatal("expected error for whitespace-only search query, got nil")
 	}
 }
 
@@ -1034,6 +1061,154 @@ func TestEditTrimsWhitespace(t *testing.T) {
 	got, _ := s.Get(item.ID)
 	if got.Title != "Updated title" {
 		t.Errorf("expected trimmed title 'Updated title', got %q", got.Title)
+	}
+}
+
+func TestSortByPriority(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("No priority")
+	_, _ = s.AddWithPriority("Low task", PriorityLow)
+	_, _ = s.AddWithPriority("High task", PriorityHigh)
+	_, _ = s.AddWithPriority("Medium task", PriorityMedium)
+
+	if err := s.Sort(SortByPriority); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"High task", "Medium task", "Low task", "No priority"}
+	for i, want := range expected {
+		if s.Items[i].Title != want {
+			t.Errorf("index %d: expected %q, got %q", i, want, s.Items[i].Title)
+		}
+	}
+}
+
+func TestSortByDue(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("No due date")
+	due1, _ := ParseDueDate("2025-12-01")
+	due2, _ := ParseDueDate("2025-06-01")
+	due3, _ := ParseDueDate("2025-09-01")
+	_, _ = s.AddFull("December task", PriorityNone, due1)
+	_, _ = s.AddFull("June task", PriorityNone, due2)
+	_, _ = s.AddFull("September task", PriorityNone, due3)
+
+	if err := s.Sort(SortByDue); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"June task", "September task", "December task", "No due date"}
+	for i, want := range expected {
+		if s.Items[i].Title != want {
+			t.Errorf("index %d: expected %q, got %q", i, want, s.Items[i].Title)
+		}
+	}
+}
+
+func TestSortByStatus(t *testing.T) {
+	s := tempStore(t)
+	pending, _ := s.Add("Pending task")
+	done, _ := s.Add("Done task")
+	inProgress, _ := s.Add("In-progress task")
+	_ = s.SetStatus(done.ID, StatusDone)
+	_ = s.SetStatus(inProgress.ID, StatusInProgress)
+
+	if err := s.Sort(SortByStatus); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Items[0].ID != inProgress.ID {
+		t.Errorf("expected in_progress first, got %q", s.Items[0].Title)
+	}
+	if s.Items[1].ID != pending.ID {
+		t.Errorf("expected pending second, got %q", s.Items[1].Title)
+	}
+	if s.Items[2].ID != done.ID {
+		t.Errorf("expected done last, got %q", s.Items[2].Title)
+	}
+}
+
+func TestSortByCreated(t *testing.T) {
+	s := tempStore(t)
+	// Items are added in order, so sorting by created should keep the same order.
+	_, _ = s.Add("First")
+	_, _ = s.Add("Second")
+	_, _ = s.Add("Third")
+
+	if err := s.Sort(SortByCreated); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{"First", "Second", "Third"}
+	for i, want := range expected {
+		if s.Items[i].Title != want {
+			t.Errorf("index %d: expected %q, got %q", i, want, s.Items[i].Title)
+		}
+	}
+}
+
+func TestSortInvalidField(t *testing.T) {
+	s := tempStore(t)
+	_, _ = s.Add("Task")
+
+	err := s.Sort(SortField("bogus"))
+	if err == nil {
+		t.Fatal("expected error for invalid sort field, got nil")
+	}
+}
+
+func TestSortEmptyStore(t *testing.T) {
+	s := tempStore(t)
+	if err := s.Sort(SortByPriority); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(s.Items))
+	}
+}
+
+func TestSortPersists(t *testing.T) {
+	f, err := os.CreateTemp("", "todo-sort-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	s1 := NewStore(f.Name())
+	s1.Load()
+	_, _ = s1.AddWithPriority("Low", PriorityLow)
+	_, _ = s1.AddWithPriority("High", PriorityHigh)
+	s1.Sort(SortByPriority)
+	if err := s1.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := NewStore(f.Name())
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if s2.Items[0].Title != "High" {
+		t.Errorf("expected 'High' first after reload, got %q", s2.Items[0].Title)
+	}
+	if s2.Items[1].Title != "Low" {
+		t.Errorf("expected 'Low' second after reload, got %q", s2.Items[1].Title)
+	}
+}
+
+func TestValidSortField(t *testing.T) {
+	valid := []SortField{SortByPriority, SortByDue, SortByStatus, SortByCreated}
+	for _, f := range valid {
+		if !ValidSortField(f) {
+			t.Errorf("expected %q to be valid", f)
+		}
+	}
+
+	invalid := []SortField{"name", "title", "id", ""}
+	for _, f := range invalid {
+		if ValidSortField(f) {
+			t.Errorf("expected %q to be invalid", f)
+		}
 	}
 }
 

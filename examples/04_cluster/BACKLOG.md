@@ -6,6 +6,8 @@
 
 ## Completed
 
+- [x] Add `todo sort <field>` command to reorder items by priority, due date, status, or creation date
+
 - [x] Add `todo clear` command to bulk-remove all completed items
 
 - [x] Basic CRUD operations (add, list, done, start, delete)

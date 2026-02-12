@@ -29,6 +29,7 @@ Commands:
                       Set or clear an item's due date
   search <query>      Search items by title substring
   stats               Show counts by status
+  sort <field>        Sort items by: priority, due, status, created
   clear               Remove all completed items
   export              Output all items as CSV
   help                Show this message
@@ -230,7 +231,11 @@ func main() {
 			os.Exit(1)
 		}
 		query := todo.ParseAddTitle(os.Args[2:])
-		items := store.Search(query)
+		items, err := store.Search(query)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		if len(items) == 0 {
 			fmt.Printf("No items matching %q.\n", query)
 			return
@@ -281,6 +286,26 @@ func main() {
 			fmt.Printf("Set #%d due date to %s.\n", id, due)
 		} else {
 			fmt.Printf("Cleared due date on #%d.\n", id)
+		}
+
+	case "sort":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: todo sort <priority|due|status|created>")
+			os.Exit(1)
+		}
+		field := todo.SortField(os.Args[2])
+		if err := store.Sort(field); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Sorted items by %s.\n", field)
+		items, _ := store.List("")
+		if len(items) > 0 {
+			printItems(items, color)
 		}
 
 	case "clear":

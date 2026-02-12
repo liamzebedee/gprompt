@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -290,7 +291,12 @@ func (s *Store) Stats() map[Status]int {
 }
 
 // Search returns items whose title contains the query (case-insensitive).
-func (s *Store) Search(query string) []Item {
+// It returns an error if the query is empty or whitespace-only.
+func (s *Store) Search(query string) ([]Item, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("search query must not be empty")
+	}
 	lower := strings.ToLower(query)
 	var result []Item
 	for _, item := range s.Items {
@@ -298,7 +304,7 @@ func (s *Store) Search(query string) []Item {
 			result = append(result, item)
 		}
 	}
-	return result
+	return result, nil
 }
 
 // ParseAddTitle joins all arguments after the command into a single title string.
@@ -358,6 +364,82 @@ func (s *Store) ClearDone() int {
 	}
 	s.Items = kept
 	return removed
+}
+
+// SortField represents a field by which items can be sorted.
+type SortField string
+
+const (
+	SortByPriority SortField = "priority"
+	SortByDue      SortField = "due"
+	SortByStatus   SortField = "status"
+	SortByCreated  SortField = "created"
+)
+
+// ValidSortField reports whether f is a recognised sort field.
+func ValidSortField(f SortField) bool {
+	switch f {
+	case SortByPriority, SortByDue, SortByStatus, SortByCreated:
+		return true
+	}
+	return false
+}
+
+// priorityRank returns a numeric rank for sorting (higher priority = lower rank = sorts first).
+func priorityRank(p Priority) int {
+	switch p {
+	case PriorityHigh:
+		return 0
+	case PriorityMedium:
+		return 1
+	case PriorityLow:
+		return 2
+	default:
+		return 3 // no priority sorts last
+	}
+}
+
+// statusRank returns a numeric rank for sorting (in_progress first, then pending, then done).
+func statusRank(s Status) int {
+	switch s {
+	case StatusInProgress:
+		return 0
+	case StatusPending:
+		return 1
+	case StatusDone:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// Sort reorders items in-place by the given field. Returns an error if the field is invalid.
+func (s *Store) Sort(field SortField) error {
+	if !ValidSortField(field) {
+		return fmt.Errorf("invalid sort field: %q (valid values: priority, due, status, created)", field)
+	}
+	sort.SliceStable(s.Items, func(i, j int) bool {
+		a, b := s.Items[i], s.Items[j]
+		switch field {
+		case SortByPriority:
+			return priorityRank(a.Priority) < priorityRank(b.Priority)
+		case SortByDue:
+			// Items with due dates sort before items without.
+			if a.DueDate.Valid != b.DueDate.Valid {
+				return a.DueDate.Valid
+			}
+			if a.DueDate.Valid && b.DueDate.Valid {
+				return a.DueDate.Time.Before(b.DueDate.Time)
+			}
+			return false
+		case SortByStatus:
+			return statusRank(a.Status) < statusRank(b.Status)
+		case SortByCreated:
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		return false
+	})
+	return nil
 }
 
 func (s *Store) List(filter Status) ([]Item, error) {
