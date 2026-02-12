@@ -25,6 +25,8 @@ Commands:
   edit <id> <title>   Rename an item
   priority <id> <low|medium|high|none>
                       Set or clear an item's priority
+  due <id> <YYYY-MM-DD|none>
+                      Set or clear an item's due date
   search <query>      Search items by title substring
   stats               Show counts by status
   export              Output all items as CSV
@@ -63,34 +65,55 @@ func main() {
 	switch cmd {
 	case "add":
 		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] <title>")
+			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] <title>")
 			os.Exit(1)
 		}
 		args := os.Args[2:]
 		var priority todo.Priority
-		if len(args) >= 2 && args[0] == "--priority" {
-			priority = todo.Priority(args[1])
-			if !todo.ValidPriority(priority) || priority == "" {
-				fmt.Fprintf(os.Stderr, "Invalid priority: %q (valid values: low, medium, high)\n", args[1])
-				os.Exit(1)
+		var due todo.DueDate
+		// Parse optional flags in any order before the title.
+		for len(args) >= 2 {
+			if args[0] == "--priority" {
+				priority = todo.Priority(args[1])
+				if !todo.ValidPriority(priority) || priority == "" {
+					fmt.Fprintf(os.Stderr, "Invalid priority: %q (valid values: low, medium, high)\n", args[1])
+					os.Exit(1)
+				}
+				args = args[2:]
+			} else if args[0] == "--due" {
+				var err error
+				due, err = todo.ParseDueDate(args[1])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					os.Exit(1)
+				}
+				args = args[2:]
+			} else {
+				break
 			}
-			args = args[2:]
 		}
 		if len(args) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] <title>")
+			fmt.Fprintln(os.Stderr, "Usage: todo add [--priority low|medium|high] [--due YYYY-MM-DD] <title>")
 			os.Exit(1)
 		}
 		title := todo.ParseAddTitle(args)
-		item := store.AddWithPriority(title, priority)
+		item, err := store.AddFull(title, priority, due)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		if err := store.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
 			os.Exit(1)
 		}
+		suffix := ""
 		if priority != "" {
-			fmt.Printf("Added #%d: %s [%s]\n", item.ID, item.Title, item.Priority)
-		} else {
-			fmt.Printf("Added #%d: %s\n", item.ID, item.Title)
+			suffix += fmt.Sprintf(" [%s]", item.Priority)
 		}
+		if item.DueDate.Valid {
+			suffix += fmt.Sprintf(" (due %s)", item.DueDate)
+		}
+		fmt.Printf("Added #%d: %s%s\n", item.ID, item.Title, suffix)
 
 	case "list":
 		var filter todo.Status
@@ -224,6 +247,41 @@ func main() {
 		fmt.Printf("%s %d\n", todo.ColorStatus(todo.StatusInProgress, color)+": ", stats[todo.StatusInProgress])
 		fmt.Printf("%s %d\n", todo.ColorStatus(todo.StatusDone, color)+":        ", stats[todo.StatusDone])
 
+	case "due":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: todo due <id> <YYYY-MM-DD|none>")
+			os.Exit(1)
+		}
+		id, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid ID: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		dateStr := os.Args[3]
+		var due todo.DueDate
+		if dateStr == "none" {
+			due = todo.DueDate{} // Valid=false clears the date
+		} else {
+			due, err = todo.ParseDueDate(dateStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		if err := store.SetDueDate(id, due); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := store.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error saving: %v\n", err)
+			os.Exit(1)
+		}
+		if due.Valid {
+			fmt.Printf("Set #%d due date to %s.\n", id, due)
+		} else {
+			fmt.Printf("Cleared due date on #%d.\n", id)
+		}
+
 	case "export":
 		if err := store.Export(os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "Error exporting: %v\n", err)
@@ -241,12 +299,17 @@ func main() {
 
 func printItems(items []todo.Item, color bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, todo.ColorLabel("ID\tSTATUS\tPRIORITY\tTITLE", color))
+	fmt.Fprintln(w, todo.ColorLabel("ID\tSTATUS\tPRIORITY\tDUE\tTITLE", color))
 	for _, item := range items {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
+		dueStr := "-"
+		if item.DueDate.Valid {
+			dueStr = todo.ColorDueDate(item.DueDate, color)
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
 			item.ID,
 			todo.ColorStatus(item.Status, color),
 			todo.ColorPriority(item.Priority, color),
+			dueStr,
 			item.Title,
 		)
 	}

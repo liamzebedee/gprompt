@@ -25,8 +25,8 @@ func tempStore(t *testing.T) *Store {
 func TestAddAndList(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Write tests")
-	s.Add("Ship feature")
+	_, _ = s.Add("Write tests")
+	_, _ = s.Add("Ship feature")
 
 	items, err := s.List("")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestAddAndList(t *testing.T) {
 func TestSetStatus(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Do thing")
+	item, _ := s.Add("Do thing")
 	if err := s.SetStatus(item.ID, StatusDone); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestSetStatus(t *testing.T) {
 func TestDelete(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Remove me")
+	item, _ := s.Add("Remove me")
 	if err := s.Delete(item.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +79,8 @@ func TestDeleteNotFound(t *testing.T) {
 func TestListFilter(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Pending task")
-	done := s.Add("Done task")
+	_, _ = s.Add("Pending task")
+	done, _ := s.Add("Done task")
 	s.SetStatus(done.ID, StatusDone)
 
 	pending, err := s.List(StatusPending)
@@ -112,11 +112,11 @@ func TestStatsEmpty(t *testing.T) {
 func TestStats(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Task A")
-	s.Add("Task B")
-	started := s.Add("Task C")
+	_, _ = s.Add("Task A")
+	_, _ = s.Add("Task B")
+	started, _ := s.Add("Task C")
 	s.SetStatus(started.ID, StatusInProgress)
-	done := s.Add("Task D")
+	done, _ := s.Add("Task D")
 	s.SetStatus(done.ID, StatusDone)
 
 	stats := s.Stats()
@@ -134,7 +134,7 @@ func TestStats(t *testing.T) {
 func TestEdit(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Old title")
+	item, _ := s.Add("Old title")
 	if err := s.Edit(item.ID, "New title"); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestParseAddTitleUsedWithAdd(t *testing.T) {
 	// Simulate: todo add Buy some milk  →  os.Args[2:] = ["Buy", "some", "milk"]
 	args := []string{"Buy", "some", "milk"}
 	title := ParseAddTitle(args)
-	item := s.Add(title)
+	item, _ := s.Add(title)
 
 	if item.Title != "Buy some milk" {
 		t.Errorf("expected title 'Buy some milk', got %q", item.Title)
@@ -270,7 +270,7 @@ func TestListInvalidFilter(t *testing.T) {
 func TestListValidFilter(t *testing.T) {
 	s := tempStore(t)
 	s.Add("Task A")
-	done := s.Add("Task B")
+	done, _ := s.Add("Task B")
 	s.SetStatus(done.ID, StatusDone)
 
 	// Empty filter returns all
@@ -324,16 +324,16 @@ func TestPersistence(t *testing.T) {
 func TestIDsStableAfterDelete(t *testing.T) {
 	s := tempStore(t)
 
-	a := s.Add("Task A") // ID 1
-	b := s.Add("Task B") // ID 2
-	c := s.Add("Task C") // ID 3
+	a, _ := s.Add("Task A") // ID 1
+	b, _ := s.Add("Task B") // ID 2
+	c, _ := s.Add("Task C") // ID 3
 
 	if err := s.Delete(c.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	// New item must NOT reuse the deleted ID 3; it should get ID 4.
-	d := s.Add("Task D")
+	d, _ := s.Add("Task D")
 	if d.ID == c.ID {
 		t.Errorf("new item reused deleted ID %d", c.ID)
 	}
@@ -359,14 +359,14 @@ func TestIDsStableAfterDeleteAndReload(t *testing.T) {
 	s1.Load()
 	s1.Add("Task A") // ID 1
 	s1.Add("Task B") // ID 2
-	c := s1.Add("Task C") // ID 3
+	c, _ := s1.Add("Task C") // ID 3
 	s1.Delete(c.ID)
 	s1.Save()
 
 	// Reload and add — must not reuse ID 3
 	s2 := NewStore(f.Name())
 	s2.Load()
-	d := s2.Add("Task D")
+	d, _ := s2.Add("Task D")
 	if d.ID <= c.ID {
 		t.Errorf("after reload, expected new ID > %d, got %d", c.ID, d.ID)
 	}
@@ -398,7 +398,7 @@ func TestExportWithItems(t *testing.T) {
 	s := tempStore(t)
 
 	s.Add("Buy groceries")
-	done := s.Add("Write tests")
+	done, _ := s.Add("Write tests")
 	s.SetStatus(done.ID, StatusDone)
 
 	var buf bytes.Buffer
@@ -473,7 +473,7 @@ func TestExportCSVEscaping(t *testing.T) {
 func TestAddWithPriority(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.AddWithPriority("Urgent task", PriorityHigh)
+	item, _ := s.AddWithPriority("Urgent task", PriorityHigh)
 	if item.Priority != PriorityHigh {
 		t.Errorf("expected priority high, got %q", item.Priority)
 	}
@@ -488,7 +488,7 @@ func TestAddWithPriority(t *testing.T) {
 func TestAddDefaultPriority(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Normal task")
+	item, _ := s.Add("Normal task")
 	if item.Priority != PriorityNone {
 		t.Errorf("expected empty priority, got %q", item.Priority)
 	}
@@ -497,7 +497,7 @@ func TestAddDefaultPriority(t *testing.T) {
 func TestSetPriority(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Task")
+	item, _ := s.Add("Task")
 	if err := s.SetPriority(item.ID, PriorityMedium); err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +511,7 @@ func TestSetPriority(t *testing.T) {
 func TestSetPriorityClear(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.AddWithPriority("Task", PriorityHigh)
+	item, _ := s.AddWithPriority("Task", PriorityHigh)
 	if err := s.SetPriority(item.ID, PriorityNone); err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func TestMultipleFiles(t *testing.T) {
 func TestSetStatusRejectsInvalid(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.Add("Task")
+	item, _ := s.Add("Task")
 
 	// Attempting to set an invalid status should return an error.
 	err := s.SetStatus(item.ID, Status("garbage"))
@@ -704,7 +704,7 @@ func TestSetStatusRejectsInvalid(t *testing.T) {
 func TestSetPriorityRejectsInvalid(t *testing.T) {
 	s := tempStore(t)
 
-	item := s.AddWithPriority("Task", PriorityHigh)
+	item, _ := s.AddWithPriority("Task", PriorityHigh)
 
 	// Attempting to set an invalid priority should return an error.
 	err := s.SetPriority(item.ID, Priority("critical"))
@@ -716,6 +716,189 @@ func TestSetPriorityRejectsInvalid(t *testing.T) {
 	got, _ := s.Get(item.ID)
 	if got.Priority != PriorityHigh {
 		t.Errorf("expected priority to remain high after invalid SetPriority, got %q", got.Priority)
+	}
+}
+
+func TestParseDueDateValid(t *testing.T) {
+	d, err := ParseDueDate("2025-03-15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Valid {
+		t.Fatal("expected Valid=true")
+	}
+	if d.String() != "2025-03-15" {
+		t.Errorf("expected '2025-03-15', got %q", d.String())
+	}
+}
+
+func TestParseDueDateEmpty(t *testing.T) {
+	d, err := ParseDueDate("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Valid {
+		t.Error("expected Valid=false for empty string")
+	}
+	if d.String() != "" {
+		t.Errorf("expected empty string, got %q", d.String())
+	}
+}
+
+func TestParseDueDateInvalid(t *testing.T) {
+	_, err := ParseDueDate("not-a-date")
+	if err == nil {
+		t.Error("expected error for invalid date string")
+	}
+}
+
+func TestAddRejectsEmptyTitle(t *testing.T) {
+	s := tempStore(t)
+
+	_, err := s.AddFull("", PriorityNone, DueDate{})
+	if err == nil {
+		t.Fatal("expected error when adding item with empty title, got nil")
+	}
+}
+
+func TestAddRejectsWhitespaceOnlyTitle(t *testing.T) {
+	s := tempStore(t)
+
+	_, err := s.AddFull("   ", PriorityNone, DueDate{})
+	if err == nil {
+		t.Fatal("expected error when adding item with whitespace-only title, got nil")
+	}
+}
+
+func TestEditRejectsEmptyTitle(t *testing.T) {
+	s := tempStore(t)
+
+	item, _ := s.AddFull("Valid title", PriorityNone, DueDate{})
+
+	err := s.Edit(item.ID, "")
+	if err == nil {
+		t.Fatal("expected error when editing item to empty title, got nil")
+	}
+
+	// Title should remain unchanged.
+	got, _ := s.Get(item.ID)
+	if got.Title != "Valid title" {
+		t.Errorf("expected title to remain 'Valid title', got %q", got.Title)
+	}
+}
+
+func TestEditRejectsWhitespaceOnlyTitle(t *testing.T) {
+	s := tempStore(t)
+
+	item, _ := s.AddFull("Valid title", PriorityNone, DueDate{})
+
+	err := s.Edit(item.ID, "   \t  ")
+	if err == nil {
+		t.Fatal("expected error when editing item to whitespace-only title, got nil")
+	}
+
+	got, _ := s.Get(item.ID)
+	if got.Title != "Valid title" {
+		t.Errorf("expected title to remain 'Valid title', got %q", got.Title)
+	}
+}
+
+func TestAddFullWithDueDate(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2025-06-01")
+	item, _ := s.AddFull("Task with due", PriorityHigh, due)
+	if !item.DueDate.Valid {
+		t.Fatal("expected due date to be set")
+	}
+	if item.DueDate.String() != "2025-06-01" {
+		t.Errorf("expected '2025-06-01', got %q", item.DueDate.String())
+	}
+	if item.Priority != PriorityHigh {
+		t.Errorf("expected priority high, got %q", item.Priority)
+	}
+}
+
+func TestSetDueDate(t *testing.T) {
+	s := tempStore(t)
+	item, _ := s.Add("Task")
+	due, _ := ParseDueDate("2025-12-25")
+	if err := s.SetDueDate(item.ID, due); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(item.ID)
+	if !got.DueDate.Valid || got.DueDate.String() != "2025-12-25" {
+		t.Errorf("expected due date '2025-12-25', got %q", got.DueDate.String())
+	}
+}
+
+func TestSetDueDateClear(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2025-12-25")
+	item, _ := s.AddFull("Task", PriorityNone, due)
+	if err := s.SetDueDate(item.ID, DueDate{}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(item.ID)
+	if got.DueDate.Valid {
+		t.Error("expected due date to be cleared")
+	}
+}
+
+func TestSetDueDateNotFound(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2025-12-25")
+	if err := s.SetDueDate(999, due); err == nil {
+		t.Error("expected error setting due date on non-existent item")
+	}
+}
+
+func TestDueDatePersistence(t *testing.T) {
+	f, err := os.CreateTemp("", "todo-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	due, _ := ParseDueDate("2025-09-01")
+	s1 := NewStore(f.Name())
+	s1.Load()
+	s1.AddFull("Deadline task", PriorityNone, due)
+	if err := s1.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := NewStore(f.Name())
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(s2.Items))
+	}
+	if !s2.Items[0].DueDate.Valid || s2.Items[0].DueDate.String() != "2025-09-01" {
+		t.Errorf("expected due date '2025-09-01' after reload, got %q (valid=%v)",
+			s2.Items[0].DueDate.String(), s2.Items[0].DueDate.Valid)
+	}
+}
+
+func TestDueDateJSON(t *testing.T) {
+	s := tempStore(t)
+	due, _ := ParseDueDate("2025-04-10")
+	s.AddFull("JSON test", PriorityNone, due)
+	s.Add("No due date")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2 := NewStore(s.file)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !s2.Items[0].DueDate.Valid {
+		t.Error("expected first item to have due date after reload")
+	}
+	if s2.Items[1].DueDate.Valid {
+		t.Error("expected second item to have no due date after reload")
 	}
 }
 

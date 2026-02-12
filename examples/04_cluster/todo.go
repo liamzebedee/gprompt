@@ -172,17 +172,20 @@ func (s *Store) nextID() int {
 	return id
 }
 
-func (s *Store) Add(title string) Item {
+func (s *Store) Add(title string) (Item, error) {
 	return s.AddFull(title, PriorityNone, DueDate{})
 }
 
 // AddWithPriority creates a new item with the given title and priority.
-func (s *Store) AddWithPriority(title string, priority Priority) Item {
+func (s *Store) AddWithPriority(title string, priority Priority) (Item, error) {
 	return s.AddFull(title, priority, DueDate{})
 }
 
 // AddFull creates a new item with the given title, priority, and optional due date.
-func (s *Store) AddFull(title string, priority Priority, due DueDate) Item {
+func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, error) {
+	if strings.TrimSpace(title) == "" {
+		return Item{}, fmt.Errorf("title must not be empty")
+	}
 	now := time.Now()
 	item := Item{
 		ID:        s.nextID(),
@@ -194,7 +197,7 @@ func (s *Store) AddFull(title string, priority Priority, due DueDate) Item {
 		UpdatedAt: now,
 	}
 	s.Items = append(s.Items, item)
-	return item
+	return item, nil
 }
 
 // SetDueDate updates the due date of an existing item. Pass an empty DueDate to clear it.
@@ -232,6 +235,9 @@ func (s *Store) SetStatus(id int, status Status) error {
 
 // Edit updates the title of an existing item.
 func (s *Store) Edit(id int, newTitle string) error {
+	if strings.TrimSpace(newTitle) == "" {
+		return fmt.Errorf("title must not be empty")
+	}
 	item, err := s.Get(id)
 	if err != nil {
 		return err
