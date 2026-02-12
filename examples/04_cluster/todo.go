@@ -21,17 +21,37 @@ const (
 	StatusDone       Status = "done"
 )
 
+type Priority string
+
+const (
+	PriorityNone   Priority = ""
+	PriorityLow    Priority = "low"
+	PriorityMedium Priority = "medium"
+	PriorityHigh   Priority = "high"
+)
+
+// ValidPriority reports whether p is a recognised priority value (including empty).
+func ValidPriority(p Priority) bool {
+	switch p {
+	case PriorityNone, PriorityLow, PriorityMedium, PriorityHigh:
+		return true
+	}
+	return false
+}
+
 type Item struct {
 	ID        int       `json:"id"`
 	Title     string    `json:"title"`
 	Status    Status    `json:"status"`
+	Priority  Priority  `json:"priority,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Store struct {
-	file  string
-	Items []Item `json:"items"`
+	file   string
+	NextID int    `json:"next_id"`
+	Items  []Item `json:"items"`
 }
 
 func NewStore(file string) *Store {
@@ -51,11 +71,38 @@ func (s *Store) Load() error {
 		s.Items = []Item{}
 		return nil
 	}
-	return json.Unmarshal(data, &s.Items)
+	// Try new format (object with next_id + items) first.
+	var raw struct {
+		NextID int    `json:"next_id"`
+		Items  []Item `json:"items"`
+	}
+	if err := json.Unmarshal(data, &raw); err == nil && raw.Items != nil {
+		s.NextID = raw.NextID
+		s.Items = raw.Items
+		return nil
+	}
+	// Fall back to legacy format (bare array of items).
+	if err := json.Unmarshal(data, &s.Items); err != nil {
+		return err
+	}
+	// Recover NextID from the max existing ID.
+	for _, item := range s.Items {
+		if item.ID >= s.NextID {
+			s.NextID = item.ID + 1
+		}
+	}
+	return nil
 }
 
 func (s *Store) Save() error {
-	data, err := json.MarshalIndent(s.Items, "", "  ")
+	envelope := struct {
+		NextID int    `json:"next_id"`
+		Items  []Item `json:"items"`
+	}{
+		NextID: s.NextID,
+		Items:  s.Items,
+	}
+	data, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -63,21 +110,26 @@ func (s *Store) Save() error {
 }
 
 func (s *Store) nextID() int {
-	max := 0
-	for _, item := range s.Items {
-		if item.ID > max {
-			max = item.ID
-		}
+	id := s.NextID
+	if id == 0 {
+		id = 1
 	}
-	return max + 1
+	s.NextID = id + 1
+	return id
 }
 
 func (s *Store) Add(title string) Item {
+	return s.AddWithPriority(title, PriorityNone)
+}
+
+// AddWithPriority creates a new item with the given title and priority.
+func (s *Store) AddWithPriority(title string, priority Priority) Item {
 	now := time.Now()
 	item := Item{
 		ID:        s.nextID(),
 		Title:     title,
 		Status:    StatusPending,
+		Priority:  priority,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -111,6 +163,17 @@ func (s *Store) Edit(id int, newTitle string) error {
 		return err
 	}
 	item.Title = newTitle
+	item.UpdatedAt = time.Now()
+	return nil
+}
+
+// SetPriority updates the priority of an existing item.
+func (s *Store) SetPriority(id int, priority Priority) error {
+	item, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	item.Priority = priority
 	item.UpdatedAt = time.Now()
 	return nil
 }
@@ -172,7 +235,7 @@ func (s *Store) Export(w io.Writer) error {
 	defer cw.Flush()
 
 	// Header row
-	if err := cw.Write([]string{"id", "title", "status", "created_at", "updated_at"}); err != nil {
+	if err := cw.Write([]string{"id", "title", "status", "priority", "created_at", "updated_at"}); err != nil {
 		return err
 	}
 
@@ -181,6 +244,7 @@ func (s *Store) Export(w io.Writer) error {
 			strconv.Itoa(item.ID),
 			item.Title,
 			string(item.Status),
+			string(item.Priority),
 			item.CreatedAt.Format(time.RFC3339),
 			item.UpdatedAt.Format(time.RFC3339),
 		}
