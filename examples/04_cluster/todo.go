@@ -186,6 +186,9 @@ func (s *Store) AddFull(title string, priority Priority, due DueDate) (Item, err
 	if strings.TrimSpace(title) == "" {
 		return Item{}, fmt.Errorf("title must not be empty")
 	}
+	if !ValidPriority(priority) {
+		return Item{}, fmt.Errorf("invalid priority: %q (valid values: low, medium, high, or empty to clear)", priority)
+	}
 	now := time.Now()
 	item := Item{
 		ID:        s.nextID(),

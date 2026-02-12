@@ -158,9 +158,9 @@ func TestEditNotFound(t *testing.T) {
 func TestSearchFindsMatches(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Buy groceries")
-	s.Add("Buy a new book")
-	s.Add("Write tests")
+	_, _ = s.Add("Buy groceries")
+	_, _ = s.Add("Buy a new book")
+	_, _ = s.Add("Write tests")
 
 	results := s.Search("buy")
 	if len(results) != 2 {
@@ -176,7 +176,7 @@ func TestSearchFindsMatches(t *testing.T) {
 func TestSearchCaseInsensitive(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Deploy To Production")
+	_, _ = s.Add("Deploy To Production")
 
 	results := s.Search("deploy to production")
 	if len(results) != 1 {
@@ -190,8 +190,8 @@ func TestSearchCaseInsensitive(t *testing.T) {
 func TestSearchNoMatches(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Write docs")
-	s.Add("Fix bug")
+	_, _ = s.Add("Write docs")
+	_, _ = s.Add("Fix bug")
 
 	results := s.Search("deploy")
 	if len(results) != 0 {
@@ -231,7 +231,7 @@ func TestParseAddTitle(t *testing.T) {
 func TestParseAddTitleUsedWithAdd(t *testing.T) {
 	s := tempStore(t)
 
-	// Simulate: todo add Buy some milk  →  os.Args[2:] = ["Buy", "some", "milk"]
+	// Simulate: todo add Buy some milk  ->  os.Args[2:] = ["Buy", "some", "milk"]
 	args := []string{"Buy", "some", "milk"}
 	title := ParseAddTitle(args)
 	item, _ := s.Add(title)
@@ -259,7 +259,7 @@ func TestValidStatus(t *testing.T) {
 
 func TestListInvalidFilter(t *testing.T) {
 	s := tempStore(t)
-	s.Add("Task A")
+	_, _ = s.Add("Task A")
 
 	_, err := s.List(Status("bogus"))
 	if err == nil {
@@ -269,7 +269,7 @@ func TestListInvalidFilter(t *testing.T) {
 
 func TestListValidFilter(t *testing.T) {
 	s := tempStore(t)
-	s.Add("Task A")
+	_, _ = s.Add("Task A")
 	done, _ := s.Add("Task B")
 	s.SetStatus(done.ID, StatusDone)
 
@@ -303,7 +303,7 @@ func TestPersistence(t *testing.T) {
 	// Write
 	s1 := NewStore(f.Name())
 	s1.Load()
-	s1.Add("Persist me")
+	_, _ = s1.Add("Persist me")
 	if err := s1.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -357,13 +357,13 @@ func TestIDsStableAfterDeleteAndReload(t *testing.T) {
 
 	s1 := NewStore(f.Name())
 	s1.Load()
-	s1.Add("Task A") // ID 1
-	s1.Add("Task B") // ID 2
+	_, _ = s1.Add("Task A") // ID 1
+	_, _ = s1.Add("Task B") // ID 2
 	c, _ := s1.Add("Task C") // ID 3
 	s1.Delete(c.ID)
 	s1.Save()
 
-	// Reload and add — must not reuse ID 3
+	// Reload and add -- must not reuse ID 3
 	s2 := NewStore(f.Name())
 	s2.Load()
 	d, _ := s2.Add("Task D")
@@ -397,7 +397,7 @@ func TestExportEmpty(t *testing.T) {
 func TestExportWithItems(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Buy groceries")
+	_, _ = s.Add("Buy groceries")
 	done, _ := s.Add("Write tests")
 	s.SetStatus(done.ID, StatusDone)
 
@@ -445,8 +445,8 @@ func TestExportWithItems(t *testing.T) {
 func TestExportCSVEscaping(t *testing.T) {
 	s := tempStore(t)
 
-	s.Add("Task with, comma")
-	s.Add("Task with \"quotes\"")
+	_, _ = s.Add("Task with, comma")
+	_, _ = s.Add("Task with \"quotes\"")
 
 	var buf bytes.Buffer
 	if err := s.Export(&buf); err != nil {
@@ -548,8 +548,8 @@ func TestValidPriority(t *testing.T) {
 func TestExportWithPriority(t *testing.T) {
 	s := tempStore(t)
 
-	s.AddWithPriority("High task", PriorityHigh)
-	s.Add("Normal task")
+	_, _ = s.AddWithPriority("High task", PriorityHigh)
+	_, _ = s.Add("Normal task")
 
 	var buf bytes.Buffer
 	if err := s.Export(&buf); err != nil {
@@ -581,8 +581,8 @@ func TestExportIncludesDueDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.AddFull("Task with due date", PriorityHigh, due)
-	s.Add("Task without due date")
+	_, _ = s.AddFull("Task with due date", PriorityHigh, due)
+	_, _ = s.Add("Task without due date")
 
 	var buf bytes.Buffer
 	if err := s.Export(&buf); err != nil {
@@ -643,8 +643,8 @@ func TestMultipleFiles(t *testing.T) {
 	if err := s1.Load(); err != nil {
 		t.Fatal(err)
 	}
-	s1.Add("Work task A")
-	s1.Add("Work task B")
+	_, _ = s1.Add("Work task A")
+	_, _ = s1.Add("Work task B")
 	if err := s1.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -654,7 +654,7 @@ func TestMultipleFiles(t *testing.T) {
 	if err := s2.Load(); err != nil {
 		t.Fatal(err)
 	}
-	s2.Add("Personal task X")
+	_, _ = s2.Add("Personal task X")
 	if err := s2.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +863,7 @@ func TestDueDatePersistence(t *testing.T) {
 	due, _ := ParseDueDate("2025-09-01")
 	s1 := NewStore(f.Name())
 	s1.Load()
-	s1.AddFull("Deadline task", PriorityNone, due)
+	_, _ = s1.AddFull("Deadline task", PriorityNone, due)
 	if err := s1.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -884,8 +884,8 @@ func TestDueDatePersistence(t *testing.T) {
 func TestDueDateJSON(t *testing.T) {
 	s := tempStore(t)
 	due, _ := ParseDueDate("2025-04-10")
-	s.AddFull("JSON test", PriorityNone, due)
-	s.Add("No due date")
+	_, _ = s.AddFull("JSON test", PriorityNone, due)
+	_, _ = s.Add("No due date")
 	if err := s.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -902,6 +902,31 @@ func TestDueDateJSON(t *testing.T) {
 	}
 }
 
+func TestAddFullRejectsInvalidPriority(t *testing.T) {
+	s := tempStore(t)
+
+	_, err := s.AddFull("Task", Priority("critical"), DueDate{})
+	if err == nil {
+		t.Fatal("expected error when adding item with invalid priority, got nil")
+	}
+	// Store should remain empty — nothing was added.
+	if len(s.Items) != 0 {
+		t.Errorf("expected 0 items after rejected add, got %d", len(s.Items))
+	}
+}
+
+func TestAddWithPriorityRejectsInvalid(t *testing.T) {
+	s := tempStore(t)
+
+	_, err := s.AddWithPriority("Task", Priority("urgent"))
+	if err == nil {
+		t.Fatal("expected error when adding item with invalid priority, got nil")
+	}
+	if len(s.Items) != 0 {
+		t.Errorf("expected 0 items after rejected add, got %d", len(s.Items))
+	}
+}
+
 func TestPriorityPersistence(t *testing.T) {
 	f, err := os.CreateTemp("", "todo-*.json")
 	if err != nil {
@@ -912,7 +937,7 @@ func TestPriorityPersistence(t *testing.T) {
 
 	s1 := NewStore(f.Name())
 	s1.Load()
-	s1.AddWithPriority("Important", PriorityHigh)
+	_, _ = s1.AddWithPriority("Important", PriorityHigh)
 	if err := s1.Save(); err != nil {
 		t.Fatal(err)
 	}

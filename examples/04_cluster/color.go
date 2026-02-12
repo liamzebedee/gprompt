@@ -3,6 +3,7 @@ package todo
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -68,6 +69,28 @@ func ColorLabel(label string, color bool) string {
 		return label
 	}
 	return colorBold + label + colorReset
+}
+
+// ColorDueDate returns the due date string, colored red+bold if overdue, yellow if
+// due today, or plain otherwise.
+func ColorDueDate(d DueDate, color bool) string {
+	if !d.Valid {
+		return "-"
+	}
+	s := d.String()
+	if !color {
+		return s
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	due := d.Time.Truncate(24 * time.Hour)
+	switch {
+	case due.Before(today):
+		return colorRed + colorBold + s + colorReset
+	case due.Equal(today):
+		return colorYellow + s + colorReset
+	default:
+		return s
+	}
 }
 
 // Colorf formats a string with the given color code, or returns it plain if color is false.
