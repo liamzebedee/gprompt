@@ -255,6 +255,11 @@ func (s *Store) AddFullWithTags(title string, priority Priority, due DueDate, ta
 		return Item{}, fmt.Errorf("invalid priority: %q (valid values: low, medium, high, or empty to clear)", priority)
 	}
 	// Validate and normalise tags.
+	for _, t := range tags {
+		if strings.Contains(t, ";") {
+			return Item{}, fmt.Errorf("tag must not contain semicolon: %q", t)
+		}
+	}
 	cleaned := normaliseTags(tags)
 	now := time.Now()
 	item := Item{
@@ -543,9 +548,11 @@ func normaliseTags(tags []string) []string {
 	return out
 }
 
-// ValidTag reports whether tag is a non-empty, trimmed string.
+// ValidTag reports whether tag is a non-empty, trimmed string without semicolons.
+// Semicolons are reserved as the tag separator in CSV export/import.
 func ValidTag(tag string) bool {
-	return strings.TrimSpace(tag) != ""
+	t := strings.TrimSpace(tag)
+	return t != "" && !strings.Contains(t, ";")
 }
 
 // AddTag adds a tag to an existing item. Duplicate tags are ignored (case-insensitive).
@@ -553,6 +560,9 @@ func (s *Store) AddTag(id int, tag string) error {
 	tag = strings.TrimSpace(strings.ToLower(tag))
 	if tag == "" {
 		return fmt.Errorf("tag must not be empty")
+	}
+	if strings.Contains(tag, ";") {
+		return fmt.Errorf("tag must not contain semicolon: %q", tag)
 	}
 	item, err := s.Get(id)
 	if err != nil {

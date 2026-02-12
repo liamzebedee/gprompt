@@ -1974,6 +1974,60 @@ func TestImportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAddTagRejectsSemicolon(t *testing.T) {
+	s := tempStore(t)
+	s.Add("Item")
+	err := s.AddTag(1, "work;personal")
+	if err == nil {
+		t.Fatal("expected error for tag containing semicolon")
+	}
+	if !strings.Contains(err.Error(), "semicolon") {
+		t.Errorf("error should mention semicolon, got: %v", err)
+	}
+}
+
+func TestAddFullWithTagsRejectsSemicolon(t *testing.T) {
+	s := tempStore(t)
+	_, err := s.AddFullWithTags("Item", PriorityNone, DueDate{}, []string{"work;personal"})
+	if err == nil {
+		t.Fatal("expected error for tag containing semicolon")
+	}
+	if !strings.Contains(err.Error(), "semicolon") {
+		t.Errorf("error should mention semicolon, got: %v", err)
+	}
+}
+
+func TestValidTagRejectsSemicolon(t *testing.T) {
+	if ValidTag("work;personal") {
+		t.Error("expected tag with semicolon to be invalid")
+	}
+}
+
+func TestExportImportRoundTripPreservesTags(t *testing.T) {
+	s := tempStore(t)
+	s.AddFullWithTags("Item", PriorityNone, DueDate{}, []string{"work", "urgent"})
+
+	var buf bytes.Buffer
+	if err := s.Export(&buf); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	s2 := tempStore(t)
+	count, err := s2.Import(strings.NewReader(buf.String()))
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 imported, got %d", count)
+	}
+	if len(s2.Items[0].Tags) != 2 {
+		t.Fatalf("expected 2 tags, got %d: %v", len(s2.Items[0].Tags), s2.Items[0].Tags)
+	}
+	if s2.Items[0].Tags[0] != "work" || s2.Items[0].Tags[1] != "urgent" {
+		t.Errorf("expected [work urgent], got %v", s2.Items[0].Tags)
+	}
+}
+
 func TestUndoRestoresTags(t *testing.T) {
 	s := tempStore(t)
 	t.Cleanup(func() { os.Remove(s.undoFile()) })

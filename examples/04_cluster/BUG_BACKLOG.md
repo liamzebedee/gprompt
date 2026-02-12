@@ -19,3 +19,4 @@
 - [x] No validation that status filter in `todo list` is a valid status value
 - [x] `todo add` with multi-word title requires quoting — should join all remaining args
 - [x] `AddFull`/`AddWithPriority` accept invalid priority values — should reject with error like `SetPriority` does
+- [x] Tags containing semicolons corrupt CSV export/import round-trip — semicolons are used as tag separator in CSV but not rejected as tag content
