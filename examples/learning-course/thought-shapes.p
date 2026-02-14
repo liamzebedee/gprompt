@@ -21,3 +21,5 @@ tinkering:
 open-ssx:
 	open, trawling, slate star codex like (chapters)
 
+listify(n):
+	Convert to [n] items.

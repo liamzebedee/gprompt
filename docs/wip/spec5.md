@@ -59,6 +59,76 @@ Ideas:
         they would overlap each other probably
 [ ] Girlfriend/groupchats agent
     [ ] Has one subagent for each DM thread
+[ ] 
+    language is a lisp (everything is expressions)
+    prompt blah(x):
+        asdasd.
+        asd.asd
+        asdasdas
+        asd
+    
+    prompts evaluate to completions
+    that's the rule
+[ ] everything is harness?
+    starting agents
+    loops
+    etc.
+    interface towards supervision
+    it's all part of the harness
+
+    that's the key bit
+    the harness should connect to a cluster
+    it shouldn't be local completions
+    and you should be able to "jump up" and supervise a process from a harness
+    allow you to evolve upwards
+
+
+plan-workstream
+(loop scrutinise-plan(workstream) n=5)
+
+the main thing is that I want this to be fast and cheap
+that's why having a language is good
+the LLM is the expensive bit
+but it's annoying to define a langauge's semantics from scratch
+
+what if we just used python's syntax with added LLM stuff? 
+what if it was like a makefile
+
+
+
+
+-> plan-workstream.md 
+-> for 3loops (scrutinise plan) 
+-> while workstreams in plan-workstreams.md take workstream generate <workstream>.md 
+-> read all <workstream>.mds create build-workstream.md 
+-> for 3loops (scuritinise and update build-workstreams.md) 
+-> while workstreams in build-workstream.md take workstream
+
+
+
+it has to be multiline
+it cannot just be single line
+so add typedefs to prompts to distinguish
+
+prompt blah-blah-blah(x):
+    asdasd
+    asdasda
+    sdas
+    das
+
+we want to generate learning outlines
+we want to generate trees of thought to look at visually
+the best interface to a tree of thought might be...the file system? a web ui?
+
+
+something to explore ideas programmatically
+
+I like the idea of it being natively visual by being a lisp
+
+
+
+
+
 
 Issues:
 [ ] gcluster steer is unusable if master crashes. can't ctrl+c out
